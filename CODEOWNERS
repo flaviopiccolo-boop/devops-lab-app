@@ -1,7 +1,7 @@
 # Global ownership
-* @flaviopiccolo-boop
+* @pipeops-platform/reviewers
 
 # Application source ownership
-/src/ @flaviopiccolo-boop
-/tests/ @flaviopiccolo-boop
-/docs/ @flaviopiccolo-boop
+/src/ @pipeops-platform/reviewers
+/tests/ @pipeops-platform/reviewers
+/docs/ @pipeops-platform/reviewers
