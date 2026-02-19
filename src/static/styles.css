@@ -1,0 +1,12 @@
+body {
+  background: #f8fafc;
+}
+
+.card {
+  border: 0;
+}
+
+table td,
+table th {
+  white-space: nowrap;
+}

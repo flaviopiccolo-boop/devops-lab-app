@@ -1,9 +1,14 @@
 from fastapi.testclient import TestClient
 
-from src.main import app
+import src.main as main
 
 
-client = TestClient(app)
+client = TestClient(main.app)
+
+
+def setup_function() -> None:
+    main.items.clear()
+    main.next_id = 1
 
 
 def test_health_endpoint() -> None:
@@ -11,3 +16,45 @@ def test_health_endpoint() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_index_page() -> None:
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Items CRUD" in response.text
+
+
+def test_create_item() -> None:
+    response = client.post(
+        "/items",
+        data={"title": "Item 1", "description": "Description 1"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "Item 1" in response.text
+    assert "Description 1" in response.text
+
+
+def test_update_item() -> None:
+    client.post("/items", data={"title": "Old", "description": "Before"})
+
+    response = client.post(
+        "/items/1/edit",
+        data={"title": "New", "description": "After"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "New" in response.text
+    assert "After" in response.text
+
+
+def test_delete_item() -> None:
+    client.post("/items", data={"title": "Delete me", "description": "tmp"})
+
+    response = client.post("/items/1/delete", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert "Delete me" not in response.text
