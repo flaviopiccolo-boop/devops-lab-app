@@ -1,0 +1,7 @@
+# Global ownership
+* @flaviopiccolo-boop
+
+# Application source ownership
+/src/ @flaviopiccolo-boop
+/tests/ @flaviopiccolo-boop
+/docs/ @flaviopiccolo-boop

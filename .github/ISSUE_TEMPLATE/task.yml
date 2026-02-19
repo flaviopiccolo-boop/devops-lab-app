@@ -1,0 +1,53 @@
+name: Task
+description: Track a planned activity
+title: "[Task]: "
+labels: ["task", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for implementation tasks and operational work.
+  - type: input
+    id: objective
+    attributes:
+      label: Objective
+      placeholder: One-line task objective
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is included and excluded?
+      placeholder: In scope / Out of scope
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Execution Steps
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Definition of Done
+      placeholder: |
+        - [ ] Condition 1
+        - [ ] Condition 2
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - Low
+        - Medium
+        - High
+    validations:
+      required: true
