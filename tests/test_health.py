@@ -7,8 +7,7 @@ client = TestClient(main.app)
 
 
 def setup_function() -> None:
-    main.items.clear()
-    main.next_id = 1
+    main._reset_items_for_tests()
 
 
 def test_health_endpoint() -> None:

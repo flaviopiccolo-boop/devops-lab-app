@@ -28,6 +28,10 @@ pip install -r requirements-dev.txt
 uvicorn src.main:app --host 0.0.0.0 --port 8080
 ```
 
+By default, local execution persists CRUD data in SQLite at `src/data/app.db`.
+
+To use PostgreSQL instead, configure either `DATABASE_URL` or `DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD`.
+
 Health check:
 
 ```powershell
@@ -44,8 +48,8 @@ pytest -q
 ### Build and run container
 
 ```powershell
-docker build -t pipeops/devops-lab-app:0.1.0 .
-docker run --rm -p 8080:8080 pipeops/devops-lab-app:0.1.0
+docker build -t pipeops/devops-lab-app:0.3.0 .
+docker run --rm -p 8080:8080 pipeops/devops-lab-app:0.3.0
 ```
 
 Container health check:
