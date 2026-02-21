@@ -1,0 +1,137 @@
+name: CI - Publish Image
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Build and Publish Image
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.vars.outputs.image_tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image vars
+        id: vars
+        run: |
+          echo "image_repo=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.vars.outputs.image_repo }}:${{ steps.vars.outputs.image_tag }}
+            ${{ steps.vars.outputs.image_repo }}:latest
+
+  open-deploy-pr:
+    name: Open PR in deploy repo
+    needs: publish
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    env:
+      DEPLOY_REPO: pipeops-platform/devops-lab-deploy
+      DEPLOY_BASE_BRANCH: main
+      DEPLOY_FILE: apps/devops-lab-app/base/kustomization.yaml
+      NEW_TAG: ${{ needs.publish.outputs.image_tag }}
+
+    steps:
+      - name: Checkout app repo
+        uses: actions/checkout@v4
+
+      - name: Check deploy token availability
+        id: gate
+        env:
+          DEPLOY_REPO_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+        run: |
+          if [ -z "$DEPLOY_REPO_TOKEN" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "DEPLOY_REPO_TOKEN not configured; skipping deploy PR creation"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup GitHub CLI auth
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          DEPLOY_REPO_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+        run: |
+          echo "$DEPLOY_REPO_TOKEN" | gh auth login --with-token
+
+      - name: Clone deploy repo
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          gh repo clone "$DEPLOY_REPO" deploy-repo
+
+      - name: Update image tag
+        if: steps.gate.outputs.enabled == 'true'
+        working-directory: deploy-repo
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          file_path = Path("apps/devops-lab-app/base/kustomization.yaml")
+          content = file_path.read_text(encoding="utf-8")
+          new_tag = "${{ env.NEW_TAG }}"
+
+          updated = re.sub(r'(?m)^(\s*newTag:\s*").*(")\s*$', rf'\1{new_tag}\2', content)
+          if content == updated:
+              print("No tag change detected")
+          file_path.write_text(updated, encoding="utf-8")
+          PY
+
+      - name: Create pull request
+        if: steps.gate.outputs.enabled == 'true'
+        working-directory: deploy-repo
+        run: |
+          if git diff --quiet -- "$DEPLOY_FILE"; then
+            echo "No deploy update required"
+            exit 0
+          fi
+
+          BRANCH="ci/promote-${NEW_TAG}"
+          git checkout -b "$BRANCH"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$DEPLOY_FILE"
+          git commit -m "chore(deploy): promote app image to ${NEW_TAG}"
+          git push --set-upstream origin "$BRANCH"
+
+          EXISTING_PR=$(gh pr list --repo "$DEPLOY_REPO" --base "$DEPLOY_BASE_BRANCH" --head "$BRANCH" --state open --json number --jq '.[0].number')
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR already exists: #$EXISTING_PR"
+            exit 0
+          fi
+
+          gh pr create \
+            --repo "$DEPLOY_REPO" \
+            --base "$DEPLOY_BASE_BRANCH" \
+            --head "$BRANCH" \
+            --title "chore(deploy): promote app image to ${NEW_TAG}" \
+            --body "Automated promotion PR from app CI pipeline.\n\n- Source repo: $GITHUB_REPOSITORY\n- Source commit: $GITHUB_SHA\n- New image tag: ${NEW_TAG}"

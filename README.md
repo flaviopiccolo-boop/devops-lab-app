@@ -19,6 +19,26 @@ This repository contains the application code, quality checks, and container bui
 - Deployment manifests in `devops-lab-deploy` consume released image tags
 - Project-level guidance is maintained in `devops-lab-hub`
 
+## CI/CD Automation (Phase 6 MVP)
+
+This repository now includes GitHub Actions workflows for:
+
+- Pull request checks (`.github/workflows/ci-pr-checks.yml`)
+	- `ruff check .`
+	- `pytest -q`
+	- Docker build smoke test
+- Main branch publish (`.github/workflows/ci-publish-image.yml`)
+	- Build and push image to GHCR with tags:
+		- `sha-<commit_sha>`
+		- `latest`
+	- Open automated PR in `devops-lab-deploy` updating app image tag
+
+### Required GitHub Secrets
+
+- `DEPLOY_REPO_TOKEN`
+	- Personal access token (or GitHub App token) with permission to push branch and create PR in `pipeops-platform/devops-lab-deploy`
+	- If missing, image publish still works and deploy PR step is skipped
+
 ## Phase 3 Quickstart
 
 ### Run locally
