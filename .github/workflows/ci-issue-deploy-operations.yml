@@ -1,0 +1,188 @@
+name: CI - Issue Deploy Operations
+
+on:
+  issues:
+    types:
+      - opened
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+jobs:
+  route:
+    name: Route issue operation
+    if: contains(github.event.issue.labels.*.name, 'deploy-operation')
+    runs-on: ubuntu-latest
+    outputs:
+      operation: ${{ steps.parse.outputs.operation }}
+      target_env: ${{ steps.parse.outputs.target_env }}
+      correlation_id: ${{ steps.parse.outputs.correlation_id }}
+
+    steps:
+      - name: Parse issue form data
+        id: parse
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_LABELS: ${{ join(github.event.issue.labels.*.name, ',') }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+
+          issue_body = os.environ.get("ISSUE_BODY", "")
+          labels = {label.strip() for label in os.environ.get("ISSUE_LABELS", "").split(",") if label.strip()}
+
+          if "deploy-promotion-request" in labels:
+            operation = "promote"
+          elif "deploy-rollback-request" in labels:
+            operation = "rollback"
+          else:
+            raise SystemExit("Issue does not include a supported deploy operation label")
+
+          match = re.search(r"(?im)^###\s*Target environment\s*$\s*([\s\S]*?)(?:^###\s|\Z)", issue_body)
+          if not match:
+            raise SystemExit("Could not read 'Target environment' from issue body")
+
+          target_env = next((line.strip() for line in match.group(1).splitlines() if line.strip()), "")
+          allowed = {"staging", "prod-blue", "prod-green"}
+          if target_env not in allowed:
+            raise SystemExit(f"Unsupported target environment: {target_env!r}")
+
+          issue_number = os.environ.get("ISSUE_NUMBER", "0")
+          correlation_id = f"issue-{issue_number}-{operation}-{target_env}"
+
+          output_file = Path(os.environ["GITHUB_OUTPUT"])
+          with output_file.open("a", encoding="utf-8") as output:
+            output.write(f"operation={operation}\n")
+            output.write(f"target_env={target_env}\n")
+            output.write(f"correlation_id={correlation_id}\n")
+          PY
+
+      - name: Add operation started comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          OPERATION: ${{ steps.parse.outputs.operation }}
+          TARGET_ENV: ${{ steps.parse.outputs.target_env }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "🚀 Starting **${OPERATION}** request for environment **${TARGET_ENV}**. Workflow orchestration is in progress."
+
+  execute:
+    name: Execute requested operation
+    needs: route
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Dispatch and watch app promotion workflow
+        if: needs.route.outputs.operation == 'promote'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_ENV: ${{ needs.route.outputs.target_env }}
+          CORRELATION_ID: ${{ needs.route.outputs.correlation_id }}
+          REF_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          WORKFLOW_NAME="CI - Promote Environment"
+
+          gh workflow run "$WORKFLOW_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$REF_BRANCH" \
+            -f target_env="$TARGET_ENV" \
+            -f correlation_id="$CORRELATION_ID"
+
+          RUN_ID=""
+          for _ in $(seq 1 60); do
+            RUN_ID=$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow "$WORKFLOW_NAME" \
+              --event workflow_dispatch \
+              --limit 30 \
+              --json databaseId,displayTitle \
+              --jq ".[] | select(.displayTitle | contains(\"$CORRELATION_ID\")) | .databaseId" | head -n 1)
+            if [ -n "$RUN_ID" ]; then
+              break
+            fi
+            sleep 5
+          done
+
+          if [ -z "$RUN_ID" ]; then
+            echo "Could not find promotion run for correlation id: $CORRELATION_ID"
+            exit 1
+          fi
+
+          gh run watch --repo "$GITHUB_REPOSITORY" "$RUN_ID" --exit-status
+
+      - name: Dispatch and watch app rollback workflow
+        if: needs.route.outputs.operation == 'rollback'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_ENV: ${{ needs.route.outputs.target_env }}
+          CORRELATION_ID: ${{ needs.route.outputs.correlation_id }}
+          REF_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          WORKFLOW_NAME="CI - Rollback Environment"
+
+          gh workflow run "$WORKFLOW_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$REF_BRANCH" \
+            -f target_env="$TARGET_ENV" \
+            -f correlation_id="$CORRELATION_ID"
+
+          RUN_ID=""
+          for _ in $(seq 1 60); do
+            RUN_ID=$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow "$WORKFLOW_NAME" \
+              --event workflow_dispatch \
+              --limit 30 \
+              --json databaseId,displayTitle \
+              --jq ".[] | select(.displayTitle | contains(\"$CORRELATION_ID\")) | .databaseId" | head -n 1)
+            if [ -n "$RUN_ID" ]; then
+              break
+            fi
+            sleep 5
+          done
+
+          if [ -z "$RUN_ID" ]; then
+            echo "Could not find rollback run for correlation id: $CORRELATION_ID"
+            exit 1
+          fi
+
+          gh run watch --repo "$GITHUB_REPOSITORY" "$RUN_ID" --exit-status
+
+  report:
+    name: Report issue result
+    needs: [route, execute]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Comment and close on success
+        if: needs.execute.result == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          OPERATION: ${{ needs.route.outputs.operation }}
+          TARGET_ENV: ${{ needs.route.outputs.target_env }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "✅ **${OPERATION}** completed successfully for **${TARGET_ENV}**."
+          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"
+
+      - name: Comment on failure
+        if: needs.execute.result != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          OPERATION: ${{ needs.route.outputs.operation }}
+          TARGET_ENV: ${{ needs.route.outputs.target_env }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "❌ **${OPERATION}** failed for **${TARGET_ENV}**. Please check the workflow logs in Actions."

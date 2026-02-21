@@ -1,0 +1,37 @@
+name: Rollback Deploy
+description: Request rollback to the previous stable version for an environment
+title: "[Deploy Rollback]: "
+labels: ["deploy-operation", "deploy-rollback-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form to request rollback of an environment to the previous stable release.
+  - type: dropdown
+    id: target_environment
+    attributes:
+      label: Target environment
+      description: Select the environment to rollback.
+      options:
+        - staging
+        - prod-blue
+        - prod-green
+    validations:
+      required: true
+  - type: textarea
+    id: incident
+    attributes:
+      label: Incident / rollback reason
+      description: Describe the problem that requires rollback.
+      placeholder: Error rate increased after deployment, rollback needed.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmation
+      options:
+        - label: I confirm rollback should target the previous stable version.
+          required: true
+        - label: I understand rollback may require environment approval before execution.
+          required: true

@@ -1,0 +1,37 @@
+name: Promote Deploy
+description: Request an environment promotion (issue-driven)
+title: "[Deploy Promote]: "
+labels: ["deploy-operation", "deploy-promotion-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form to request promotion in the deployment pipeline.
+  - type: dropdown
+    id: target_environment
+    attributes:
+      label: Target environment
+      description: Select the destination environment to promote to.
+      options:
+        - staging
+        - prod-blue
+        - prod-green
+    validations:
+      required: true
+  - type: textarea
+    id: reason
+    attributes:
+      label: Change reason
+      description: Why is this promotion being requested?
+      placeholder: Promote validated build to next environment.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-checks
+      options:
+        - label: I confirmed smoke/validation checks for current environment.
+          required: true
+        - label: I understand the workflow may require environment approval before execution.
+          required: true
