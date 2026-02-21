@@ -41,6 +41,19 @@ This repository now includes GitHub Actions workflows for:
 	- Deploy workflow opens PR in `devops-lab-deploy` behind the scenes
 	- `staging` promotions require approval in app `staging` environment
 	- `prod-*` promotions require approval in app `production` environment
+- Environment rollback from app repo (`.github/workflows/ci-rollback-environment.yml`)
+	- Manual `workflow_dispatch` to rollback to previous stable for:
+		- `staging`
+		- `prod-blue`
+		- `prod-green`
+	- App workflow dispatches `Rollback Environment` in `devops-lab-deploy` and waits for completion
+	- Deploy workflow opens rollback PR in `devops-lab-deploy` based on the previous stable overlay revision
+	- `staging` rollback requires approval in app `staging` environment
+	- `prod-*` rollback requires approval in app `production` environment
+- Issue-driven deploy operations (`.github/workflows/ci-issue-deploy-operations.yml`)
+	- Open issue template **Promote Deploy** or **Rollback Deploy**
+	- Workflow routes request, triggers the corresponding app workflow, and comments status back in the issue
+	- On success, workflow closes the issue automatically
 
 ### Required GitHub Secrets
 

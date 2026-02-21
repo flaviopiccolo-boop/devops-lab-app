@@ -1,6 +1,6 @@
-name: CI - Promote Environment
+name: CI - Rollback Environment
 
-run-name: Promote (${{ inputs.target_env }})${{ inputs.correlation_id && format(' ({0})', inputs.correlation_id) || '' }}
+run-name: Rollback to previous stable (${{ inputs.target_env }})${{ inputs.correlation_id && format(' ({0})', inputs.correlation_id) || '' }}
 
 on:
   workflow_dispatch:
@@ -22,33 +22,8 @@ permissions:
   contents: read
 
 jobs:
-  plan:
-    name: Plan promotion path
-    runs-on: ubuntu-latest
-    outputs:
-      source_env: ${{ steps.plan.outputs.source_env }}
-      target_env: ${{ steps.plan.outputs.target_env }}
-
-    steps:
-      - name: Resolve source environment
-        id: plan
-        env:
-          TARGET_ENV: ${{ inputs.target_env }}
-        run: |
-          echo "target_env=$TARGET_ENV" >> "$GITHUB_OUTPUT"
-
-          if [ "$TARGET_ENV" = "staging" ]; then
-            echo "source_env=dev" >> "$GITHUB_OUTPUT"
-          elif [ "$TARGET_ENV" = "prod-blue" ] || [ "$TARGET_ENV" = "prod-green" ]; then
-            echo "source_env=staging" >> "$GITHUB_OUTPUT"
-          else
-            echo "Unsupported target environment: $TARGET_ENV"
-            exit 1
-          fi
-
   gate:
-    name: Check promotion credentials
-    needs: plan
+    name: Check rollback credentials
     runs-on: ubuntu-latest
     outputs:
       enabled: ${{ steps.gate.outputs.enabled }}
@@ -61,39 +36,35 @@ jobs:
         run: |
           if [ -z "$DEPLOY_REPO_TOKEN" ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "DEPLOY_REPO_TOKEN not configured; skipping promotion"
+            echo "DEPLOY_REPO_TOKEN not configured; skipping rollback"
           else
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           fi
 
-  promote-staging:
-    name: Promote dev to staging
-    needs: [plan, gate]
-    if: needs.plan.outputs.target_env == 'staging' && needs.gate.outputs.enabled == 'true'
+  rollback-staging:
+    name: Rollback staging to previous stable
+    needs: gate
+    if: inputs.target_env == 'staging' && needs.gate.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     environment: staging
 
     steps:
-      - name: Dispatch and wait deploy promotion workflow
+      - name: Dispatch and wait deploy rollback workflow
         env:
           GH_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
           DEPLOY_REPO: pipeops-platform/devops-lab-deploy
           DEPLOY_BASE_BRANCH: main
-          SOURCE_ENV: ${{ needs.plan.outputs.source_env }}
-          TARGET_ENV: ${{ needs.plan.outputs.target_env }}
-          INPUT_CORRELATION_ID: ${{ inputs.correlation_id }}
+          TARGET_ENV: ${{ inputs.target_env }}
+          CORRELATION_ID: ${{ inputs.correlation_id != '' && inputs.correlation_id || format('app-rollback-{0}-{1}', github.run_id, github.job) }}
+          REQUESTED_BY: ${{ github.actor }}
         run: |
-          WORKFLOW_NAME="Promote Environment"
-          CORRELATION_ID="$INPUT_CORRELATION_ID"
-          if [ -z "$CORRELATION_ID" ]; then
-            CORRELATION_ID="app-${GITHUB_RUN_ID}-${GITHUB_JOB}-${RANDOM}"
-          fi
+          WORKFLOW_NAME="Rollback Environment"
 
           gh workflow run "$WORKFLOW_NAME" \
             --repo "$DEPLOY_REPO" \
             --ref "$DEPLOY_BASE_BRANCH" \
-            -f source_env="$SOURCE_ENV" \
             -f target_env="$TARGET_ENV" \
+            -f requested_by="$REQUESTED_BY" \
             -f correlation_id="$CORRELATION_ID"
 
           RUN_ID=""
@@ -112,41 +83,36 @@ jobs:
           done
 
           if [ -z "$RUN_ID" ]; then
-            echo "Could not find dispatched deploy workflow run for correlation id: $CORRELATION_ID"
+            echo "Could not find dispatched deploy rollback run for correlation id: $CORRELATION_ID"
             exit 1
           fi
 
-          echo "Watching deploy workflow run id: $RUN_ID"
           gh run watch --repo "$DEPLOY_REPO" "$RUN_ID" --exit-status
 
-  promote-production:
-    name: Promote staging to production slot
-    needs: [plan, gate]
-    if: (needs.plan.outputs.target_env == 'prod-blue' || needs.plan.outputs.target_env == 'prod-green') && needs.gate.outputs.enabled == 'true'
+  rollback-production:
+    name: Rollback production slot to previous stable
+    needs: gate
+    if: (inputs.target_env == 'prod-blue' || inputs.target_env == 'prod-green') && needs.gate.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     environment: prod
 
     steps:
-      - name: Dispatch and wait deploy promotion workflow
+      - name: Dispatch and wait deploy rollback workflow
         env:
           GH_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
           DEPLOY_REPO: pipeops-platform/devops-lab-deploy
           DEPLOY_BASE_BRANCH: main
-          SOURCE_ENV: ${{ needs.plan.outputs.source_env }}
-          TARGET_ENV: ${{ needs.plan.outputs.target_env }}
-          INPUT_CORRELATION_ID: ${{ inputs.correlation_id }}
+          TARGET_ENV: ${{ inputs.target_env }}
+          CORRELATION_ID: ${{ inputs.correlation_id != '' && inputs.correlation_id || format('app-rollback-{0}-{1}', github.run_id, github.job) }}
+          REQUESTED_BY: ${{ github.actor }}
         run: |
-          WORKFLOW_NAME="Promote Environment"
-          CORRELATION_ID="$INPUT_CORRELATION_ID"
-          if [ -z "$CORRELATION_ID" ]; then
-            CORRELATION_ID="app-${GITHUB_RUN_ID}-${GITHUB_JOB}-${RANDOM}"
-          fi
+          WORKFLOW_NAME="Rollback Environment"
 
           gh workflow run "$WORKFLOW_NAME" \
             --repo "$DEPLOY_REPO" \
             --ref "$DEPLOY_BASE_BRANCH" \
-            -f source_env="$SOURCE_ENV" \
             -f target_env="$TARGET_ENV" \
+            -f requested_by="$REQUESTED_BY" \
             -f correlation_id="$CORRELATION_ID"
 
           RUN_ID=""
@@ -165,9 +131,8 @@ jobs:
           done
 
           if [ -z "$RUN_ID" ]; then
-            echo "Could not find dispatched deploy workflow run for correlation id: $CORRELATION_ID"
+            echo "Could not find dispatched deploy rollback run for correlation id: $CORRELATION_ID"
             exit 1
           fi
 
-          echo "Watching deploy workflow run id: $RUN_ID"
           gh run watch --repo "$DEPLOY_REPO" "$RUN_ID" --exit-status
