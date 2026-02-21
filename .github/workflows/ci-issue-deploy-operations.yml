@@ -13,7 +13,10 @@ permissions:
 jobs:
   create-request-pr:
     name: Create app PR for deploy request
-    if: contains(github.event.issue.labels.*.name, 'deploy-operation')
+    if: |
+      contains(join(github.event.issue.labels.*.name, ','), 'deploy-operation') ||
+      startsWith(github.event.issue.title, '[Deploy Promote]') ||
+      startsWith(github.event.issue.title, '[Deploy Rollback]')
     runs-on: ubuntu-latest
 
     steps:
@@ -32,10 +35,15 @@ jobs:
 
           issue_body = os.environ.get("ISSUE_BODY", "")
           labels = {label.strip() for label in os.environ.get("ISSUE_LABELS", "").split(",") if label.strip()}
+          issue_title = os.environ.get("ISSUE_TITLE", "")
 
           if "deploy-promotion-request" in labels:
             operation = "promote"
           elif "deploy-rollback-request" in labels:
+            operation = "rollback"
+          elif issue_title.startswith("[Deploy Promote]"):
+            operation = "promote"
+          elif issue_title.startswith("[Deploy Rollback]"):
             operation = "rollback"
           else:
             raise SystemExit("Issue does not include a supported deploy operation label")
@@ -51,7 +59,6 @@ jobs:
 
           issue_number = os.environ.get("ISSUE_NUMBER", "0")
           correlation_id = f"issue-{issue_number}-{operation}-{target_env}"
-          issue_title = os.environ.get("ISSUE_TITLE", "")
 
           output_file = Path(os.environ["GITHUB_OUTPUT"])
           with output_file.open("a", encoding="utf-8") as output:
