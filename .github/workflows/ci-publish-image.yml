@@ -119,13 +119,18 @@ jobs:
 
           file_path = Path("apps/devops-lab-app/overlays/dev/kustomization.yaml")
           content = file_path.read_text(encoding="utf-8")
-            new_image_repo = "${{ env.NEW_IMAGE_REPO }}"
+          new_image_repo = "${{ env.NEW_IMAGE_REPO }}".strip()
+          if not new_image_repo:
+            current_name_match = re.search(r'(?m)^\s*-\s*name:\s*(.+)$', content)
+            if not current_name_match:
+              raise SystemExit("Could not read current image name from deploy overlay")
+            new_image_repo = current_name_match.group(1).strip()
           new_tag = "${{ env.NEW_TAG }}"
 
-            updated = re.sub(r'(?m)^(\s*-\s*name:\s*).*$' , rf'\1{new_image_repo}', content)
-            updated = re.sub(r'(?m)^(\s*newTag:\s*").*(")\s*$', rf'\1{new_tag}\2', updated)
+          updated = re.sub(r'(?m)^(\s*-\s*name:\s*).*$' , rf'\1{new_image_repo}', content)
+          updated = re.sub(r'(?m)^(\s*newTag:\s*").*(")\s*$', rf'\1{new_tag}\2', updated)
           if content == updated:
-              print("No tag change detected")
+            print("No tag change detected")
           file_path.write_text(updated, encoding="utf-8")
           PY
 
