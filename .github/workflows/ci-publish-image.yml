@@ -82,6 +82,7 @@ jobs:
           DEPLOY_REPO_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
         run: |
           echo "$DEPLOY_REPO_TOKEN" | gh auth login --with-token
+          gh auth setup-git
 
       - name: Clone deploy repo
         if: steps.gate.outputs.enabled == 'true'
