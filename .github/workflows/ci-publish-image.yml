@@ -121,12 +121,12 @@ jobs:
           fi
 
           BRANCH="ci/promote-dev-${NEW_TAG}"
-          git checkout -b "$BRANCH"
+          git checkout -B "$BRANCH"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add "$DEPLOY_FILE"
           git commit -m "chore(deploy): promote dev image to ${NEW_TAG}"
-          git push --set-upstream origin "$BRANCH"
+          git push --force-with-lease --set-upstream origin "$BRANCH"
 
           EXISTING_PR=$(gh pr list --repo "$DEPLOY_REPO" --base "$DEPLOY_BASE_BRANCH" --head "$BRANCH" --state open --json number --jq '.[0].number')
           if [ -n "$EXISTING_PR" ]; then
