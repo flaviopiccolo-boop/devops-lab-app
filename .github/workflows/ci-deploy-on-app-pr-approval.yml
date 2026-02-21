@@ -1,0 +1,128 @@
+name: CI - Deploy On App PR Approval
+
+on:
+  pull_request_review:
+    types:
+      - submitted
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  dispatch:
+    name: Dispatch deploy after app approval
+    if: |
+      github.event.review.state == 'approved' &&
+      github.event.pull_request.base.ref == 'main' &&
+      contains(github.event.pull_request.labels.*.name, 'deploy-operation-request') &&
+      !contains(github.event.pull_request.labels.*.name, 'deploy-operation-dispatched')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Parse deploy metadata from PR body
+        id: parse
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+
+          body = os.environ.get("PR_BODY", "")
+
+          def read_value(key: str) -> str:
+            match = re.search(rf"(?im)^\s*{re.escape(key)}:\s*(.+?)\s*$", body)
+            if not match:
+              raise SystemExit(f"Missing deploy metadata key: {key}")
+            return match.group(1).strip()
+
+          operation = read_value("operation")
+          target_env = read_value("target_env")
+          correlation_id = read_value("correlation_id")
+          issue_number = read_value("issue_number")
+
+          if operation not in {"promote", "rollback"}:
+            raise SystemExit(f"Unsupported operation in metadata: {operation}")
+          if target_env not in {"staging", "prod-blue", "prod-green"}:
+            raise SystemExit(f"Unsupported target_env in metadata: {target_env}")
+
+          output_file = Path(os.environ["GITHUB_OUTPUT"])
+          with output_file.open("a", encoding="utf-8") as output:
+            output.write(f"operation={operation}\n")
+            output.write(f"target_env={target_env}\n")
+            output.write(f"correlation_id={correlation_id}\n")
+            output.write(f"issue_number={issue_number}\n")
+          PY
+
+      - name: Dispatch requested workflow
+        id: dispatch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPERATION: ${{ steps.parse.outputs.operation }}
+          TARGET_ENV: ${{ steps.parse.outputs.target_env }}
+          CORRELATION_ID: ${{ steps.parse.outputs.correlation_id }}
+          ISSUE_NUMBER: ${{ steps.parse.outputs.issue_number }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$OPERATION" = "promote" ]; then
+            WORKFLOW_NAME="CI - Promote Environment"
+          else
+            WORKFLOW_NAME="CI - Rollback Environment"
+          fi
+
+          gh workflow run "$WORKFLOW_NAME" \
+            --repo "$REPO" \
+            --ref "main" \
+            -f target_env="$TARGET_ENV" \
+            -f correlation_id="$CORRELATION_ID"
+
+          RUN_ID=""
+          for _ in $(seq 1 60); do
+            RUN_ID=$(gh run list \
+              --repo "$REPO" \
+              --workflow "$WORKFLOW_NAME" \
+              --event workflow_dispatch \
+              --limit 30 \
+              --json databaseId,displayTitle \
+              --jq ".[] | select(.displayTitle | contains(\"$CORRELATION_ID\")) | .databaseId" | head -n 1)
+            if [ -n "$RUN_ID" ]; then
+              break
+            fi
+            sleep 5
+          done
+
+          if [ -z "$RUN_ID" ]; then
+            echo "Could not find ${OPERATION} run for correlation id: $CORRELATION_ID"
+            exit 1
+          fi
+
+          RUN_URL="$GITHUB_SERVER_URL/$REPO/actions/runs/$RUN_ID"
+          echo "workflow_name=$WORKFLOW_NAME" >> "$GITHUB_OUTPUT"
+          echo "run_url=$RUN_URL" >> "$GITHUB_OUTPUT"
+          echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Mark PR as dispatched
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          WORKFLOW_NAME: ${{ steps.dispatch.outputs.workflow_name }}
+          RUN_URL: ${{ steps.dispatch.outputs.run_url }}
+          OPERATION: ${{ steps.parse.outputs.operation }}
+          TARGET_ENV: ${{ steps.parse.outputs.target_env }}
+        run: |
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "deploy-operation-dispatched"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "✅ Approved and dispatched **${OPERATION}** for **${TARGET_ENV}**.\n\n- Workflow: ${WORKFLOW_NAME}\n- Run: ${RUN_URL}"
+
+      - name: Comment back on source issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.dispatch.outputs.issue_number }}
+          OPERATION: ${{ steps.parse.outputs.operation }}
+          TARGET_ENV: ${{ steps.parse.outputs.target_env }}
+          RUN_URL: ${{ steps.dispatch.outputs.run_url }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "✅ PR aprovada no app. Deploy disparado para **${TARGET_ENV}** (${OPERATION}).\n\n- Run: ${RUN_URL}"

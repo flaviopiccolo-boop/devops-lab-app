@@ -52,8 +52,9 @@ This repository now includes GitHub Actions workflows for:
 	- `prod-*` rollback requires approval in app `production` environment
 - Issue-driven deploy operations (`.github/workflows/ci-issue-deploy-operations.yml`)
 	- Open issue template **Promote Deploy** or **Rollback Deploy**
-	- Workflow routes request, triggers the corresponding app workflow, and comments status back in the issue
-	- On success, workflow closes the issue automatically
+	- Workflow routes request and opens an **app PR** for approval (`deploy-operation-request`)
+	- After PR approval, `CI - Deploy On App PR Approval` dispatches the corresponding deploy workflow
+	- Issue and PR receive run links/status comments for traceability
 
 ### Required GitHub Secrets
 
