@@ -73,7 +73,7 @@ jobs:
       DEPLOY_REPO: pipeops-platform/devops-lab-deploy
       DEPLOY_BASE_BRANCH: main
       DEPLOY_FILE: apps/devops-lab-app/overlays/dev/kustomization.yaml
-      NEW_IMAGE_REPO: ${{ needs.publish.outputs.image_repo }}
+      NEW_IMAGE_REPO: ${{ secrets.RUNTIME_IMAGE_REPO != '' && secrets.RUNTIME_IMAGE_REPO || format('ghcr.io/{0}', github.repository) }}
       NEW_TAG: ${{ needs.publish.outputs.image_tag }}
 
     steps:
