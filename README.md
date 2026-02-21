@@ -37,15 +37,19 @@ This repository now includes GitHub Actions workflows for:
 		- `dev -> staging`
 		- `staging -> prod-blue`
 		- `staging -> prod-green`
-	- Promotion is requested from app repo and opens PR in `devops-lab-deploy` behind the scenes
+	- App workflow dispatches `Promote Environment` in `devops-lab-deploy` and waits for completion
+	- Deploy workflow opens PR in `devops-lab-deploy` behind the scenes
 	- `staging` promotions require approval in app `staging` environment
 	- `prod-*` promotions require approval in app `production` environment
 
 ### Required GitHub Secrets
 
 - `DEPLOY_REPO_TOKEN`
-	- Personal access token (or GitHub App token) with permission to push branch and create PR in `pipeops-platform/devops-lab-deploy`
-	- If missing, image publish still works and deploy PR step is skipped
+	- Personal access token (or GitHub App token) with permission in `pipeops-platform/devops-lab-deploy` for:
+		- dispatching workflows (`actions:write`)
+		- reading workflow runs (`actions:read`)
+		- pushing branches / creating PRs (used by deploy-side workflow)
+	- If missing, image publish still works and deploy promotion steps are skipped
 - `ENABLE_DEPLOY_PROMOTION`
 	- Must be set to `true` to enable automated PR creation in `devops-lab-deploy`
 	- If `false`, image publish runs but no deploy PR is opened
@@ -56,6 +60,9 @@ This repository now includes GitHub Actions workflows for:
 - `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (required when `RUNTIME_IMAGE_REPO` is not GHCR)
 	- Used by publish workflow to login and push image to Docker Hub
 	- For GHCR, workflow uses `GITHUB_TOKEN`
+- `ENABLE_DEPLOY_AUTO_MERGE` (optional)
+	- Set to `true` to request auto-merge on deploy PRs created by workflows
+	- Repository protection rules can still require manual approval/merge
 
 ### Required GitHub Environments (app repo)
 

@@ -68,7 +68,7 @@ jobs:
     environment: staging
 
     steps:
-      - name: Promote in deploy repo
+      - name: Dispatch and wait deploy promotion workflow
         env:
           GH_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
           DEPLOY_REPO: pipeops-platform/devops-lab-deploy
@@ -76,78 +76,38 @@ jobs:
           SOURCE_ENV: ${{ needs.plan.outputs.source_env }}
           TARGET_ENV: ${{ needs.plan.outputs.target_env }}
         run: |
-          gh auth setup-git
-          gh repo clone "$DEPLOY_REPO" deploy-repo
-          cd deploy-repo
+          WORKFLOW_NAME="Promote Environment"
+          CORRELATION_ID="app-${GITHUB_RUN_ID}-${GITHUB_JOB}-${RANDOM}"
 
-          python - <<'PY'
-          from pathlib import Path
-          import re
-
-          source_env = "${{ env.SOURCE_ENV }}"
-          target_env = "${{ env.TARGET_ENV }}"
-
-          source_file = Path(f"apps/devops-lab-app/overlays/{source_env}/kustomization.yaml")
-          target_file = Path(f"apps/devops-lab-app/overlays/{target_env}/kustomization.yaml")
-
-          source_content = source_file.read_text(encoding="utf-8")
-          target_content = target_file.read_text(encoding="utf-8")
-
-          source_name = re.search(r'(?m)^\s*-\s*name:\s*(.+)$', source_content)
-          source_new_name = re.search(r'(?m)^\s*newName:\s*(.+)$', source_content)
-          source_tag = re.search(r'(?m)^\s*newTag:\s*"([^"]+)"\s*$', source_content)
-
-          if not source_name or not source_tag:
-            raise SystemExit("Could not read source image name/newTag")
-
-          image_name = source_name.group(1).strip()
-          image_new_name = source_new_name.group(1).strip() if source_new_name else image_name
-          image_tag = source_tag.group(1).strip()
-
-          updated = re.sub(r'(?m)^(\s*-\s*name:\s*).+$', rf'\1{image_name}', target_content)
-          if re.search(r'(?m)^\s*newName:\s*.+$', updated):
-            updated = re.sub(r'(?m)^(\s*newName:\s*).+$', rf'\1{image_new_name}', updated)
-          else:
-            updated = re.sub(
-              r'(?m)^(\s*)-\s*name:\s*.+$',
-              rf'\1- name: {image_name}\n\1  newName: {image_new_name}',
-              updated,
-              count=1,
-            )
-          updated = re.sub(r'(?m)^(\s*newTag:\s*").*("\s*)$', rf'\1{image_tag}\2', updated)
-
-          target_file.write_text(updated, encoding="utf-8")
-          print(image_tag)
-          PY
-
-          TARGET_FILE="apps/devops-lab-app/overlays/${TARGET_ENV}/kustomization.yaml"
-          if git diff --quiet -- "$TARGET_FILE"; then
-            echo "No promotion change required"
-            exit 0
-          fi
-
-          IMAGE_TAG=$(grep -E '^\s*newTag:' "$TARGET_FILE" | head -n 1 | sed -E 's/^\s*newTag:\s*"?([^"]+)"?\s*$/\1/')
-
-          BRANCH="app-promote-${SOURCE_ENV}-to-${TARGET_ENV}-${IMAGE_TAG}"
-          git checkout -B "$BRANCH"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "$TARGET_FILE"
-          git commit -m "chore(deploy): promote ${SOURCE_ENV} -> ${TARGET_ENV} (${IMAGE_TAG})"
-          git push --force-with-lease --set-upstream origin "$BRANCH"
-
-          EXISTING_PR=$(gh pr list --repo "$DEPLOY_REPO" --base "$DEPLOY_BASE_BRANCH" --head "$BRANCH" --state open --json number --jq '.[0].number')
-          if [ -n "$EXISTING_PR" ]; then
-            echo "PR already exists: #$EXISTING_PR"
-            exit 0
-          fi
-
-          gh pr create \
+          gh workflow run "$WORKFLOW_NAME" \
             --repo "$DEPLOY_REPO" \
-            --base "$DEPLOY_BASE_BRANCH" \
-            --head "$BRANCH" \
-            --title "chore(deploy): promote ${SOURCE_ENV} -> ${TARGET_ENV} (${IMAGE_TAG})" \
-            --body "Promotion initiated from app repository workflow.\n\n- Source repo: $GITHUB_REPOSITORY\n- Source run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\n- Source environment: ${SOURCE_ENV}\n- Target environment: ${TARGET_ENV}\n- Image tag: ${IMAGE_TAG}"
+            --ref "$DEPLOY_BASE_BRANCH" \
+            -f source_env="$SOURCE_ENV" \
+            -f target_env="$TARGET_ENV" \
+            -f correlation_id="$CORRELATION_ID"
+
+          RUN_ID=""
+          for _ in $(seq 1 60); do
+            RUN_ID=$(gh run list \
+              --repo "$DEPLOY_REPO" \
+              --workflow "$WORKFLOW_NAME" \
+              --event workflow_dispatch \
+              --limit 30 \
+              --json databaseId,displayTitle \
+              --jq ".[] | select(.displayTitle | contains(\"$CORRELATION_ID\")) | .databaseId" | head -n 1)
+            if [ -n "$RUN_ID" ]; then
+              break
+            fi
+            sleep 5
+          done
+
+          if [ -z "$RUN_ID" ]; then
+            echo "Could not find dispatched deploy workflow run for correlation id: $CORRELATION_ID"
+            exit 1
+          fi
+
+          echo "Watching deploy workflow run id: $RUN_ID"
+          gh run watch --repo "$DEPLOY_REPO" "$RUN_ID" --exit-status
 
   promote-production:
     name: Promote staging to production slot
@@ -157,7 +117,7 @@ jobs:
     environment: prod
 
     steps:
-      - name: Promote in deploy repo
+      - name: Dispatch and wait deploy promotion workflow
         env:
           GH_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
           DEPLOY_REPO: pipeops-platform/devops-lab-deploy
@@ -165,75 +125,35 @@ jobs:
           SOURCE_ENV: ${{ needs.plan.outputs.source_env }}
           TARGET_ENV: ${{ needs.plan.outputs.target_env }}
         run: |
-          gh auth setup-git
-          gh repo clone "$DEPLOY_REPO" deploy-repo
-          cd deploy-repo
+          WORKFLOW_NAME="Promote Environment"
+          CORRELATION_ID="app-${GITHUB_RUN_ID}-${GITHUB_JOB}-${RANDOM}"
 
-          python - <<'PY'
-          from pathlib import Path
-          import re
-
-          source_env = "${{ env.SOURCE_ENV }}"
-          target_env = "${{ env.TARGET_ENV }}"
-
-          source_file = Path(f"apps/devops-lab-app/overlays/{source_env}/kustomization.yaml")
-          target_file = Path(f"apps/devops-lab-app/overlays/{target_env}/kustomization.yaml")
-
-          source_content = source_file.read_text(encoding="utf-8")
-          target_content = target_file.read_text(encoding="utf-8")
-
-          source_name = re.search(r'(?m)^\s*-\s*name:\s*(.+)$', source_content)
-          source_new_name = re.search(r'(?m)^\s*newName:\s*(.+)$', source_content)
-          source_tag = re.search(r'(?m)^\s*newTag:\s*"([^"]+)"\s*$', source_content)
-
-          if not source_name or not source_tag:
-            raise SystemExit("Could not read source image name/newTag")
-
-          image_name = source_name.group(1).strip()
-          image_new_name = source_new_name.group(1).strip() if source_new_name else image_name
-          image_tag = source_tag.group(1).strip()
-
-          updated = re.sub(r'(?m)^(\s*-\s*name:\s*).+$', rf'\1{image_name}', target_content)
-          if re.search(r'(?m)^\s*newName:\s*.+$', updated):
-            updated = re.sub(r'(?m)^(\s*newName:\s*).+$', rf'\1{image_new_name}', updated)
-          else:
-            updated = re.sub(
-              r'(?m)^(\s*)-\s*name:\s*.+$',
-              rf'\1- name: {image_name}\n\1  newName: {image_new_name}',
-              updated,
-              count=1,
-            )
-          updated = re.sub(r'(?m)^(\s*newTag:\s*").*("\s*)$', rf'\1{image_tag}\2', updated)
-
-          target_file.write_text(updated, encoding="utf-8")
-          print(image_tag)
-          PY
-
-          TARGET_FILE="apps/devops-lab-app/overlays/${TARGET_ENV}/kustomization.yaml"
-          if git diff --quiet -- "$TARGET_FILE"; then
-            echo "No promotion change required"
-            exit 0
-          fi
-
-          IMAGE_TAG=$(grep -E '^\s*newTag:' "$TARGET_FILE" | head -n 1 | sed -E 's/^\s*newTag:\s*"?([^"]+)"?\s*$/\1/')
-
-          BRANCH="app-promote-${SOURCE_ENV}-to-${TARGET_ENV}-${IMAGE_TAG}"
-          git checkout -B "$BRANCH"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "$TARGET_FILE"
-          git commit -m "chore(deploy): promote ${SOURCE_ENV} -> ${TARGET_ENV} (${IMAGE_TAG})"
-          git push --force-with-lease --set-upstream origin "$BRANCH"
-
-          EXISTING_PR=$(gh pr list --repo "$DEPLOY_REPO" --base "$DEPLOY_BASE_BRANCH" --head "$BRANCH" --state open --json number --jq '.[0].number')
-          if [ -n "$EXISTING_PR" ]; then
-            echo "PR already exists: #$EXISTING_PR"
-            exit 0
-          fi
-
-          gh pr create \
+          gh workflow run "$WORKFLOW_NAME" \
             --repo "$DEPLOY_REPO" \
-            --base "$DEPLOY_BASE_BRANCH" \
-            --head "$BRANCH" \
-            --title "chore(deploy): promote ${SOURCE_ENV} -> ${TARGET_ENV} (${IMAGE_TAG})" \
-            --body "Promotion initiated from app repository workflow.\n\n- Source repo: $GITHUB_REPOSITORY\n- Source run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\n- Source environment: ${SOURCE_ENV}\n- Target environment: ${TARGET_ENV}\n- Image tag: ${IMAGE_TAG}"
+            --ref "$DEPLOY_BASE_BRANCH" \
+            -f source_env="$SOURCE_ENV" \
+            -f target_env="$TARGET_ENV" \
+            -f correlation_id="$CORRELATION_ID"
+
+          RUN_ID=""
+          for _ in $(seq 1 60); do
+            RUN_ID=$(gh run list \
+              --repo "$DEPLOY_REPO" \
+              --workflow "$WORKFLOW_NAME" \
+              --event workflow_dispatch \
+              --limit 30 \
+              --json databaseId,displayTitle \
+              --jq ".[] | select(.displayTitle | contains(\"$CORRELATION_ID\")) | .databaseId" | head -n 1)
+            if [ -n "$RUN_ID" ]; then
+              break
+            fi
+            sleep 5
+          done
+
+          if [ -z "$RUN_ID" ]; then
+            echo "Could not find dispatched deploy workflow run for correlation id: $CORRELATION_ID"
+            exit 1
+          fi
+
+          echo "Watching deploy workflow run id: $RUN_ID"
+          gh run watch --repo "$DEPLOY_REPO" "$RUN_ID" --exit-status
