@@ -31,7 +31,9 @@ jobs:
         run: ruff check .
 
       - name: Pytest
-        run: pytest -q
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m pytest -q
 
       - name: Docker build (smoke)
         run: docker build -t devops-lab-app:pr-${{ github.event.number }} .
