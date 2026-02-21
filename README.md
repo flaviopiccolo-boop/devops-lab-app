@@ -38,6 +38,16 @@ This repository now includes GitHub Actions workflows for:
 - `DEPLOY_REPO_TOKEN`
 	- Personal access token (or GitHub App token) with permission to push branch and create PR in `pipeops-platform/devops-lab-deploy`
 	- If missing, image publish still works and deploy PR step is skipped
+- `ENABLE_DEPLOY_PROMOTION`
+	- Must be set to `true` to enable automated PR creation in `devops-lab-deploy`
+	- If `false`, image publish runs but no deploy PR is opened
+- `RUNTIME_IMAGE_REPO` (recommended)
+	- Full image repository used by runtime, e.g. `docker.io/<your-user>/devops-lab-app`
+	- The deploy PR updates `apps/devops-lab-app/overlays/dev/kustomization.yaml` with this repo + new tag
+	- If omitted, workflow defaults to `ghcr.io/<owner>/<repo>`
+- `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (required when `RUNTIME_IMAGE_REPO` is not GHCR)
+	- Used by publish workflow to login and push image to Docker Hub
+	- For GHCR, workflow uses `GITHUB_TOKEN`
 
 ## Phase 3 Quickstart
 
