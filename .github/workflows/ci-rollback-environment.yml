@@ -32,11 +32,11 @@ jobs:
       - name: Validate deploy token
         id: gate
         env:
-          DEPLOY_REPO_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+          APP_PR_TOKEN: ${{ secrets.APP_PR_TOKEN }}
         run: |
-          if [ -z "$DEPLOY_REPO_TOKEN" ]; then
+          if [ -z "$APP_PR_TOKEN" ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "DEPLOY_REPO_TOKEN not configured; skipping rollback"
+            echo "APP_PR_TOKEN not configured; skipping rollback"
           else
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           fi
@@ -51,7 +51,7 @@ jobs:
     steps:
       - name: Dispatch and wait deploy rollback workflow
         env:
-          GH_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+          GH_TOKEN: ${{ secrets.APP_PR_TOKEN }}
           DEPLOY_REPO: pipeops-platform/devops-lab-deploy
           DEPLOY_BASE_BRANCH: main
           TARGET_ENV: ${{ inputs.target_env }}
@@ -99,7 +99,7 @@ jobs:
     steps:
       - name: Dispatch and wait deploy rollback workflow
         env:
-          GH_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+          GH_TOKEN: ${{ secrets.APP_PR_TOKEN }}
           DEPLOY_REPO: pipeops-platform/devops-lab-deploy
           DEPLOY_BASE_BRANCH: main
           TARGET_ENV: ${{ inputs.target_env }}

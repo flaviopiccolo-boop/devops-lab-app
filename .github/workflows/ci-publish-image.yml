@@ -85,15 +85,15 @@ jobs:
       - name: Check deploy token availability
         id: gate
         env:
-          DEPLOY_REPO_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+          APP_PR_TOKEN: ${{ secrets.APP_PR_TOKEN }}
           ENABLE_DEPLOY_PROMOTION: ${{ secrets.ENABLE_DEPLOY_PROMOTION }}
         run: |
           if [ "$ENABLE_DEPLOY_PROMOTION" != "true" ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "ENABLE_DEPLOY_PROMOTION is not true; skipping deploy PR creation"
-          elif [ -z "$DEPLOY_REPO_TOKEN" ]; then
+          elif [ -z "$APP_PR_TOKEN" ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "DEPLOY_REPO_TOKEN not configured; skipping deploy PR creation"
+            echo "APP_PR_TOKEN not configured; skipping deploy PR creation"
           else
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           fi
@@ -101,9 +101,9 @@ jobs:
       - name: Setup GitHub CLI auth
         if: steps.gate.outputs.enabled == 'true'
         env:
-          DEPLOY_REPO_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+          APP_PR_TOKEN: ${{ secrets.APP_PR_TOKEN }}
         run: |
-          echo "$DEPLOY_REPO_TOKEN" | gh auth login --with-token
+          echo "$APP_PR_TOKEN" | gh auth login --with-token
           gh auth setup-git
 
       - name: Clone deploy repo
