@@ -17,7 +17,7 @@ jobs:
     if: |
       github.event.review.state == 'approved' &&
       github.event.pull_request.base.ref == 'main' &&
-      contains(github.event.pull_request.labels.*.name, 'deploy-operation-request') &&
+      contains(github.event.pull_request.body, 'deploy-operation-metadata') &&
       !contains(github.event.pull_request.labels.*.name, 'deploy-operation-dispatched')
     runs-on: ubuntu-latest
 
@@ -114,6 +114,7 @@ jobs:
           OPERATION: ${{ steps.parse.outputs.operation }}
           TARGET_ENV: ${{ steps.parse.outputs.target_env }}
         run: |
+          gh label create "deploy-operation-dispatched" --repo "$GITHUB_REPOSITORY" --color "1f6feb" --description "Deploy request already dispatched" --force
           gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "deploy-operation-dispatched"
           gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "✅ Approved and dispatched **${OPERATION}** for **${TARGET_ENV}**.\n\n- Workflow: ${WORKFLOW_NAME}\n- Run: ${RUN_URL}"
 
