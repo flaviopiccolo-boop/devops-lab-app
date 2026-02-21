@@ -77,6 +77,9 @@ This repository now includes GitHub Actions workflows for:
 - `ENABLE_DEPLOY_AUTO_MERGE` (optional)
 	- Set to `true` to request auto-merge on deploy PRs created by workflows
 	- Repository protection rules can still require manual approval/merge
+- `APP_PR_TOKEN` (recommended when org blocks PR creation by `GITHUB_TOKEN`)
+	- Personal access token (or GitHub App token) with permission to create pull requests in `devops-lab-app`
+	- Used by issue-driven workflow to open app PRs when repository setting "Allow GitHub Actions to create and approve pull requests" is disabled by policy
 
 ### Required GitHub Environments (app repo)
 
