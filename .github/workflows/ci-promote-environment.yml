@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   plan:
@@ -171,3 +172,50 @@ jobs:
 
           echo "Watching deploy workflow run id: $RUN_ID"
           gh run watch --repo "$DEPLOY_REPO" "$RUN_ID" --exit-status
+
+  issue-feedback:
+    name: Update source issue
+    needs: [promote-staging, promote-production]
+    if: always() && startsWith(inputs.correlation_id, 'issue-')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Comment and close issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CORRELATION_ID: ${{ inputs.correlation_id }}
+          TARGET_ENV: ${{ inputs.target_env }}
+          STAGING_RESULT: ${{ needs.promote-staging.result }}
+          PROD_RESULT: ${{ needs.promote-production.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          ISSUE_NUMBER=$(echo "$CORRELATION_ID" | sed -E 's/^issue-([0-9]+)-.*/\1/')
+          if [ -z "$ISSUE_NUMBER" ] || [ "$ISSUE_NUMBER" = "$CORRELATION_ID" ]; then
+            echo "Could not extract issue number from correlation_id"
+            exit 0
+          fi
+
+          DEPLOY_RESULT="skipped"
+          if [ "$STAGING_RESULT" = "success" ] || [ "$PROD_RESULT" = "success" ]; then
+            DEPLOY_RESULT="success"
+          elif [ "$STAGING_RESULT" = "failure" ] || [ "$PROD_RESULT" = "failure" ]; then
+            DEPLOY_RESULT="failure"
+          elif [ "$STAGING_RESULT" = "cancelled" ] || [ "$PROD_RESULT" = "cancelled" ]; then
+            DEPLOY_RESULT="cancelled"
+          fi
+
+          if [ "$DEPLOY_RESULT" = "success" ]; then
+            gh label create "deploy-succeeded" --repo "$GITHUB_REPOSITORY" --color "0e8a16" --description "Deploy completed successfully" --force
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --body "$(printf '✅ **Deploy de promotion concluído com sucesso!**\n\n- Target: **%s**\n- Run: %s\n\nIssue fechada automaticamente.' "$TARGET_ENV" "$RUN_URL")"
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "deploy-succeeded"
+            gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
+          elif [ "$DEPLOY_RESULT" = "failure" ]; then
+            gh label create "deploy-failed" --repo "$GITHUB_REPOSITORY" --color "d73a4a" --description "Deploy failed" --force
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --body "$(printf '❌ **Deploy de promotion falhou.**\n\n- Target: **%s**\n- Run: %s\n\nVerifique os logs e crie uma nova issue se necessário.' "$TARGET_ENV" "$RUN_URL")"
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "deploy-failed"
+          elif [ "$DEPLOY_RESULT" = "cancelled" ]; then
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --body "$(printf '⚠️ **Deploy de promotion cancelado.**\n\n- Target: **%s**\n- Run: %s' "$TARGET_ENV" "$RUN_URL")"
+          fi
