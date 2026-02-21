@@ -77,17 +77,30 @@ jobs:
     name: Execute requested operation
     needs: route
     runs-on: ubuntu-latest
+    outputs:
+      run_url: ${{ steps.execute.outputs.run_url }}
+      run_id: ${{ steps.execute.outputs.run_id }}
+      workflow_name: ${{ steps.execute.outputs.workflow_name }}
 
     steps:
-      - name: Dispatch and watch app promotion workflow
-        if: needs.route.outputs.operation == 'promote'
+      - name: Dispatch and watch app workflow
+        id: execute
         env:
           GH_TOKEN: ${{ github.token }}
+          OPERATION: ${{ needs.route.outputs.operation }}
           TARGET_ENV: ${{ needs.route.outputs.target_env }}
           CORRELATION_ID: ${{ needs.route.outputs.correlation_id }}
           REF_BRANCH: ${{ github.event.repository.default_branch }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
-          WORKFLOW_NAME="CI - Promote Environment"
+          if [ "$OPERATION" = "promote" ]; then
+            WORKFLOW_NAME="CI - Promote Environment"
+          elif [ "$OPERATION" = "rollback" ]; then
+            WORKFLOW_NAME="CI - Rollback Environment"
+          else
+            echo "Unsupported operation: $OPERATION"
+            exit 1
+          fi
 
           gh workflow run "$WORKFLOW_NAME" \
             --repo "$GITHUB_REPOSITORY" \
@@ -111,47 +124,18 @@ jobs:
           done
 
           if [ -z "$RUN_ID" ]; then
-            echo "Could not find promotion run for correlation id: $CORRELATION_ID"
+            echo "Could not find ${OPERATION} run for correlation id: $CORRELATION_ID"
             exit 1
           fi
 
-          gh run watch --repo "$GITHUB_REPOSITORY" "$RUN_ID" --exit-status
+          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
+          echo "run_url=$RUN_URL" >> "$GITHUB_OUTPUT"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "workflow_name=$WORKFLOW_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Dispatch and watch app rollback workflow
-        if: needs.route.outputs.operation == 'rollback'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET_ENV: ${{ needs.route.outputs.target_env }}
-          CORRELATION_ID: ${{ needs.route.outputs.correlation_id }}
-          REF_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          WORKFLOW_NAME="CI - Rollback Environment"
-
-          gh workflow run "$WORKFLOW_NAME" \
+          gh issue comment "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
-            --ref "$REF_BRANCH" \
-            -f target_env="$TARGET_ENV" \
-            -f correlation_id="$CORRELATION_ID"
-
-          RUN_ID=""
-          for _ in $(seq 1 60); do
-            RUN_ID=$(gh run list \
-              --repo "$GITHUB_REPOSITORY" \
-              --workflow "$WORKFLOW_NAME" \
-              --event workflow_dispatch \
-              --limit 30 \
-              --json databaseId,displayTitle \
-              --jq ".[] | select(.displayTitle | contains(\"$CORRELATION_ID\")) | .databaseId" | head -n 1)
-            if [ -n "$RUN_ID" ]; then
-              break
-            fi
-            sleep 5
-          done
-
-          if [ -z "$RUN_ID" ]; then
-            echo "Could not find rollback run for correlation id: $CORRELATION_ID"
-            exit 1
-          fi
+            --body "🔎 Request dispatched to **${WORKFLOW_NAME}** for **${TARGET_ENV}**.\n\n- Run: ${RUN_URL}\n- Status: waiting for execution/approvals"
 
           gh run watch --repo "$GITHUB_REPOSITORY" "$RUN_ID" --exit-status
 
@@ -169,10 +153,11 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           OPERATION: ${{ needs.route.outputs.operation }}
           TARGET_ENV: ${{ needs.route.outputs.target_env }}
+          RUN_URL: ${{ needs.execute.outputs.run_url }}
         run: |
           gh issue comment "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
-            --body "✅ **${OPERATION}** completed successfully for **${TARGET_ENV}**."
+            --body "✅ **${OPERATION}** completed successfully for **${TARGET_ENV}**.\n\n- Run: ${RUN_URL}"
           gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"
 
       - name: Comment on failure
@@ -182,7 +167,8 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           OPERATION: ${{ needs.route.outputs.operation }}
           TARGET_ENV: ${{ needs.route.outputs.target_env }}
+          RUN_URL: ${{ needs.execute.outputs.run_url }}
         run: |
           gh issue comment "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
-            --body "❌ **${OPERATION}** failed for **${TARGET_ENV}**. Please check the workflow logs in Actions."
+            --body "❌ **${OPERATION}** failed for **${TARGET_ENV}**. Please check the workflow logs in Actions.\n\n- Run: ${RUN_URL}"
