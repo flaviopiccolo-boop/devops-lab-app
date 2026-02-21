@@ -112,6 +112,15 @@ jobs:
           git commit -m "chore(deploy): request ${OPERATION} ${TARGET_ENV} (issue #${ISSUE_NUMBER})"
           git push --force-with-lease --set-upstream origin "$BRANCH"
 
+          echo "branch_name=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "request_file=$REQUEST_FILE" >> "$GITHUB_OUTPUT"
+
+          gh label create "deploy-operation-request" \
+            --repo "$GITHUB_REPOSITORY" \
+            --color "1f6feb" \
+            --description "PR created from issue-driven deploy operation" \
+            --force
+
           EXISTING_PR=$(gh pr list --repo "$GITHUB_REPOSITORY" --base "$BASE_BRANCH" --head "$BRANCH" --state open --json number --jq '.[0].number')
           if [ -n "$EXISTING_PR" ]; then
             PR_URL=$(gh pr view "$EXISTING_PR" --repo "$GITHUB_REPOSITORY" --json url --jq .url)
@@ -156,7 +165,9 @@ jobs:
           OPERATION: ${{ steps.parse.outputs.operation }}
           TARGET_ENV: ${{ steps.parse.outputs.target_env }}
           PR_URL: ${{ steps.pr.outputs.pr_url }}
+          REQUEST_BRANCH: ${{ steps.pr.outputs.branch_name }}
+          REQUEST_FILE: ${{ steps.pr.outputs.request_file }}
         run: |
           gh issue comment "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
-            --body "📝 Request registrada. PR criada no repositório app para aprovação.\n\n- Operation: ${OPERATION}\n- Target environment: ${TARGET_ENV}\n- App PR: ${PR_URL}\n\nApós aprovação dessa PR no app, o deploy será disparado automaticamente."
+            --body "📝 Request registrada. PR criada no repositório app para aprovação.\n\n- Operation: ${OPERATION}\n- Target environment: ${TARGET_ENV}\n- Request branch: ${REQUEST_BRANCH}\n- Request file: ${REQUEST_FILE}\n- App PR: ${PR_URL}\n\nApós aprovação dessa PR no app, o deploy será disparado automaticamente."
