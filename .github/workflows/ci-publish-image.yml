@@ -74,6 +74,7 @@ jobs:
       DEPLOY_BASE_BRANCH: main
       DEPLOY_FILE: apps/devops-lab-app/overlays/dev/kustomization.yaml
       DEPLOY_IMAGE_NAME: pipeops/devops-lab-app
+      ENABLE_DEPLOY_AUTO_MERGE: ${{ secrets['ENABLE_DEPLOY_AUTO_MERGE'] }}
       NEW_IMAGE_REPO: ${{ secrets.RUNTIME_IMAGE_REPO != '' && secrets.RUNTIME_IMAGE_REPO || format('ghcr.io/{0}', github.repository) }}
       NEW_TAG: ${{ needs.publish.outputs.image_tag }}
 
@@ -165,6 +166,16 @@ jobs:
           EXISTING_PR=$(gh pr list --repo "$DEPLOY_REPO" --base "$DEPLOY_BASE_BRANCH" --head "$BRANCH" --state open --json number --jq '.[0].number')
           if [ -n "$EXISTING_PR" ]; then
             echo "PR already exists: #$EXISTING_PR"
+
+            if [ "$ENABLE_DEPLOY_AUTO_MERGE" = "true" ]; then
+              set +e
+              gh pr merge --repo "$DEPLOY_REPO" --auto --squash "$EXISTING_PR"
+              MERGE_EXIT=$?
+              set -e
+              if [ $MERGE_EXIT -ne 0 ]; then
+                echo "Auto-merge could not be enabled for existing PR #$EXISTING_PR; manual merge may still be required"
+              fi
+            fi
             exit 0
           fi
 
@@ -174,3 +185,19 @@ jobs:
             --head "$BRANCH" \
             --title "chore(deploy): promote dev image to ${NEW_TAG}" \
             --body "Automated dev promotion PR from app CI pipeline.\n\n- Source repo: $GITHUB_REPOSITORY\n- Source commit: $GITHUB_SHA\n- Target environment: dev\n- New image repo: ${NEW_IMAGE_REPO}\n- New image tag: ${NEW_TAG}"
+
+          CREATED_PR=$(gh pr list --repo "$DEPLOY_REPO" --base "$DEPLOY_BASE_BRANCH" --head "$BRANCH" --state open --json number --jq '.[0].number')
+          if [ -z "$CREATED_PR" ]; then
+            echo "Could not resolve created deploy PR number"
+            exit 1
+          fi
+
+          if [ "$ENABLE_DEPLOY_AUTO_MERGE" = "true" ]; then
+            set +e
+            gh pr merge --repo "$DEPLOY_REPO" --auto --squash "$CREATED_PR"
+            MERGE_EXIT=$?
+            set -e
+            if [ $MERGE_EXIT -ne 0 ]; then
+              echo "Auto-merge could not be enabled for PR #$CREATED_PR; manual merge may still be required"
+            fi
+          fi
