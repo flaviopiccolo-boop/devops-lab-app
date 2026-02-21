@@ -75,7 +75,7 @@ jobs:
       - name: Create request file and pull request
         id: pr
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.APP_PR_TOKEN != '' && secrets.APP_PR_TOKEN || github.token }}
           OPERATION: ${{ steps.parse.outputs.operation }}
           TARGET_ENV: ${{ steps.parse.outputs.target_env }}
           CORRELATION_ID: ${{ steps.parse.outputs.correlation_id }}
