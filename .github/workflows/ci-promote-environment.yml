@@ -1,0 +1,239 @@
+name: CI - Promote Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: Target environment in deploy repo
+        required: true
+        type: choice
+        options:
+          - staging
+          - prod-blue
+          - prod-green
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan promotion path
+    runs-on: ubuntu-latest
+    outputs:
+      source_env: ${{ steps.plan.outputs.source_env }}
+      target_env: ${{ steps.plan.outputs.target_env }}
+
+    steps:
+      - name: Resolve source environment
+        id: plan
+        env:
+          TARGET_ENV: ${{ inputs.target_env }}
+        run: |
+          echo "target_env=$TARGET_ENV" >> "$GITHUB_OUTPUT"
+
+          if [ "$TARGET_ENV" = "staging" ]; then
+            echo "source_env=dev" >> "$GITHUB_OUTPUT"
+          elif [ "$TARGET_ENV" = "prod-blue" ] || [ "$TARGET_ENV" = "prod-green" ]; then
+            echo "source_env=staging" >> "$GITHUB_OUTPUT"
+          else
+            echo "Unsupported target environment: $TARGET_ENV"
+            exit 1
+          fi
+
+  gate:
+    name: Check promotion credentials
+    needs: plan
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+
+    steps:
+      - name: Validate deploy token
+        id: gate
+        env:
+          DEPLOY_REPO_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+        run: |
+          if [ -z "$DEPLOY_REPO_TOKEN" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "DEPLOY_REPO_TOKEN not configured; skipping promotion"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  promote-staging:
+    name: Promote dev to staging
+    needs: [plan, gate]
+    if: needs.plan.outputs.target_env == 'staging' && needs.gate.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment: staging
+
+    steps:
+      - name: Promote in deploy repo
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+          DEPLOY_REPO: pipeops-platform/devops-lab-deploy
+          DEPLOY_BASE_BRANCH: main
+          SOURCE_ENV: ${{ needs.plan.outputs.source_env }}
+          TARGET_ENV: ${{ needs.plan.outputs.target_env }}
+        run: |
+          gh auth setup-git
+          gh repo clone "$DEPLOY_REPO" deploy-repo
+          cd deploy-repo
+
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          source_env = "${{ env.SOURCE_ENV }}"
+          target_env = "${{ env.TARGET_ENV }}"
+
+          source_file = Path(f"apps/devops-lab-app/overlays/{source_env}/kustomization.yaml")
+          target_file = Path(f"apps/devops-lab-app/overlays/{target_env}/kustomization.yaml")
+
+          source_content = source_file.read_text(encoding="utf-8")
+          target_content = target_file.read_text(encoding="utf-8")
+
+          source_name = re.search(r'(?m)^\s*-\s*name:\s*(.+)$', source_content)
+          source_new_name = re.search(r'(?m)^\s*newName:\s*(.+)$', source_content)
+          source_tag = re.search(r'(?m)^\s*newTag:\s*"([^"]+)"\s*$', source_content)
+
+          if not source_name or not source_tag:
+            raise SystemExit("Could not read source image name/newTag")
+
+          image_name = source_name.group(1).strip()
+          image_new_name = source_new_name.group(1).strip() if source_new_name else image_name
+          image_tag = source_tag.group(1).strip()
+
+          updated = re.sub(r'(?m)^(\s*-\s*name:\s*).+$', rf'\1{image_name}', target_content)
+          if re.search(r'(?m)^\s*newName:\s*.+$', updated):
+            updated = re.sub(r'(?m)^(\s*newName:\s*).+$', rf'\1{image_new_name}', updated)
+          else:
+            updated = re.sub(
+              r'(?m)^(\s*)-\s*name:\s*.+$',
+              rf'\1- name: {image_name}\n\1  newName: {image_new_name}',
+              updated,
+              count=1,
+            )
+          updated = re.sub(r'(?m)^(\s*newTag:\s*").*("\s*)$', rf'\1{image_tag}\2', updated)
+
+          target_file.write_text(updated, encoding="utf-8")
+          print(image_tag)
+          PY
+
+          TARGET_FILE="apps/devops-lab-app/overlays/${TARGET_ENV}/kustomization.yaml"
+          if git diff --quiet -- "$TARGET_FILE"; then
+            echo "No promotion change required"
+            exit 0
+          fi
+
+          IMAGE_TAG=$(grep -E '^\s*newTag:' "$TARGET_FILE" | head -n 1 | sed -E 's/^\s*newTag:\s*"?([^"]+)"?\s*$/\1/')
+
+          BRANCH="app-promote-${SOURCE_ENV}-to-${TARGET_ENV}-${IMAGE_TAG}"
+          git checkout -B "$BRANCH"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$TARGET_FILE"
+          git commit -m "chore(deploy): promote ${SOURCE_ENV} -> ${TARGET_ENV} (${IMAGE_TAG})"
+          git push --force-with-lease --set-upstream origin "$BRANCH"
+
+          EXISTING_PR=$(gh pr list --repo "$DEPLOY_REPO" --base "$DEPLOY_BASE_BRANCH" --head "$BRANCH" --state open --json number --jq '.[0].number')
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR already exists: #$EXISTING_PR"
+            exit 0
+          fi
+
+          gh pr create \
+            --repo "$DEPLOY_REPO" \
+            --base "$DEPLOY_BASE_BRANCH" \
+            --head "$BRANCH" \
+            --title "chore(deploy): promote ${SOURCE_ENV} -> ${TARGET_ENV} (${IMAGE_TAG})" \
+            --body "Promotion initiated from app repository workflow.\n\n- Source repo: $GITHUB_REPOSITORY\n- Source run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\n- Source environment: ${SOURCE_ENV}\n- Target environment: ${TARGET_ENV}\n- Image tag: ${IMAGE_TAG}"
+
+  promote-production:
+    name: Promote staging to production slot
+    needs: [plan, gate]
+    if: (needs.plan.outputs.target_env == 'prod-blue' || needs.plan.outputs.target_env == 'prod-green') && needs.gate.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment: prod
+
+    steps:
+      - name: Promote in deploy repo
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+          DEPLOY_REPO: pipeops-platform/devops-lab-deploy
+          DEPLOY_BASE_BRANCH: main
+          SOURCE_ENV: ${{ needs.plan.outputs.source_env }}
+          TARGET_ENV: ${{ needs.plan.outputs.target_env }}
+        run: |
+          gh auth setup-git
+          gh repo clone "$DEPLOY_REPO" deploy-repo
+          cd deploy-repo
+
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          source_env = "${{ env.SOURCE_ENV }}"
+          target_env = "${{ env.TARGET_ENV }}"
+
+          source_file = Path(f"apps/devops-lab-app/overlays/{source_env}/kustomization.yaml")
+          target_file = Path(f"apps/devops-lab-app/overlays/{target_env}/kustomization.yaml")
+
+          source_content = source_file.read_text(encoding="utf-8")
+          target_content = target_file.read_text(encoding="utf-8")
+
+          source_name = re.search(r'(?m)^\s*-\s*name:\s*(.+)$', source_content)
+          source_new_name = re.search(r'(?m)^\s*newName:\s*(.+)$', source_content)
+          source_tag = re.search(r'(?m)^\s*newTag:\s*"([^"]+)"\s*$', source_content)
+
+          if not source_name or not source_tag:
+            raise SystemExit("Could not read source image name/newTag")
+
+          image_name = source_name.group(1).strip()
+          image_new_name = source_new_name.group(1).strip() if source_new_name else image_name
+          image_tag = source_tag.group(1).strip()
+
+          updated = re.sub(r'(?m)^(\s*-\s*name:\s*).+$', rf'\1{image_name}', target_content)
+          if re.search(r'(?m)^\s*newName:\s*.+$', updated):
+            updated = re.sub(r'(?m)^(\s*newName:\s*).+$', rf'\1{image_new_name}', updated)
+          else:
+            updated = re.sub(
+              r'(?m)^(\s*)-\s*name:\s*.+$',
+              rf'\1- name: {image_name}\n\1  newName: {image_new_name}',
+              updated,
+              count=1,
+            )
+          updated = re.sub(r'(?m)^(\s*newTag:\s*").*("\s*)$', rf'\1{image_tag}\2', updated)
+
+          target_file.write_text(updated, encoding="utf-8")
+          print(image_tag)
+          PY
+
+          TARGET_FILE="apps/devops-lab-app/overlays/${TARGET_ENV}/kustomization.yaml"
+          if git diff --quiet -- "$TARGET_FILE"; then
+            echo "No promotion change required"
+            exit 0
+          fi
+
+          IMAGE_TAG=$(grep -E '^\s*newTag:' "$TARGET_FILE" | head -n 1 | sed -E 's/^\s*newTag:\s*"?([^"]+)"?\s*$/\1/')
+
+          BRANCH="app-promote-${SOURCE_ENV}-to-${TARGET_ENV}-${IMAGE_TAG}"
+          git checkout -B "$BRANCH"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$TARGET_FILE"
+          git commit -m "chore(deploy): promote ${SOURCE_ENV} -> ${TARGET_ENV} (${IMAGE_TAG})"
+          git push --force-with-lease --set-upstream origin "$BRANCH"
+
+          EXISTING_PR=$(gh pr list --repo "$DEPLOY_REPO" --base "$DEPLOY_BASE_BRANCH" --head "$BRANCH" --state open --json number --jq '.[0].number')
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR already exists: #$EXISTING_PR"
+            exit 0
+          fi
+
+          gh pr create \
+            --repo "$DEPLOY_REPO" \
+            --base "$DEPLOY_BASE_BRANCH" \
+            --head "$BRANCH" \
+            --title "chore(deploy): promote ${SOURCE_ENV} -> ${TARGET_ENV} (${IMAGE_TAG})" \
+            --body "Promotion initiated from app repository workflow.\n\n- Source repo: $GITHUB_REPOSITORY\n- Source run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\n- Source environment: ${SOURCE_ENV}\n- Target environment: ${TARGET_ENV}\n- Image tag: ${IMAGE_TAG}"
