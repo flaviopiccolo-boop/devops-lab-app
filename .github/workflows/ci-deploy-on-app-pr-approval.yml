@@ -105,10 +105,11 @@ jobs:
           echo "run_url=$RUN_URL" >> "$GITHUB_OUTPUT"
           echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
 
-      - name: Mark PR as dispatched
+      - name: Close PR and clean up
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
           WORKFLOW_NAME: ${{ steps.dispatch.outputs.workflow_name }}
           RUN_URL: ${{ steps.dispatch.outputs.run_url }}
           OPERATION: ${{ steps.parse.outputs.operation }}
@@ -116,7 +117,9 @@ jobs:
         run: |
           gh label create "deploy-operation-dispatched" --repo "$GITHUB_REPOSITORY" --color "1f6feb" --description "Deploy request already dispatched" --force
           gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "deploy-operation-dispatched"
-          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "✅ Approved and dispatched **${OPERATION}** for **${TARGET_ENV}**.\n\n- Workflow: ${WORKFLOW_NAME}\n- Run: ${RUN_URL}"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "✅ Approved and dispatched **${OPERATION}** for **${TARGET_ENV}**.\n\n- Workflow: ${WORKFLOW_NAME}\n- Run: ${RUN_URL}\n\nThis PR served as an approval gate and will be closed without merging."
+          gh pr close "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
+          git push origin --delete "$BRANCH" 2>/dev/null || true
 
       - name: Comment back on source issue
         env:
