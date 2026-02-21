@@ -57,7 +57,7 @@ jobs:
     env:
       DEPLOY_REPO: pipeops-platform/devops-lab-deploy
       DEPLOY_BASE_BRANCH: main
-      DEPLOY_FILE: apps/devops-lab-app/base/kustomization.yaml
+      DEPLOY_FILE: apps/devops-lab-app/overlays/dev/kustomization.yaml
       NEW_TAG: ${{ needs.publish.outputs.image_tag }}
 
     steps:
@@ -97,7 +97,7 @@ jobs:
           from pathlib import Path
           import re
 
-          file_path = Path("apps/devops-lab-app/base/kustomization.yaml")
+          file_path = Path("apps/devops-lab-app/overlays/dev/kustomization.yaml")
           content = file_path.read_text(encoding="utf-8")
           new_tag = "${{ env.NEW_TAG }}"
 
@@ -116,12 +116,12 @@ jobs:
             exit 0
           fi
 
-          BRANCH="ci/promote-${NEW_TAG}"
+          BRANCH="ci/promote-dev-${NEW_TAG}"
           git checkout -b "$BRANCH"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add "$DEPLOY_FILE"
-          git commit -m "chore(deploy): promote app image to ${NEW_TAG}"
+          git commit -m "chore(deploy): promote dev image to ${NEW_TAG}"
           git push --set-upstream origin "$BRANCH"
 
           EXISTING_PR=$(gh pr list --repo "$DEPLOY_REPO" --base "$DEPLOY_BASE_BRANCH" --head "$BRANCH" --state open --json number --jq '.[0].number')
@@ -134,5 +134,5 @@ jobs:
             --repo "$DEPLOY_REPO" \
             --base "$DEPLOY_BASE_BRANCH" \
             --head "$BRANCH" \
-            --title "chore(deploy): promote app image to ${NEW_TAG}" \
-            --body "Automated promotion PR from app CI pipeline.\n\n- Source repo: $GITHUB_REPOSITORY\n- Source commit: $GITHUB_SHA\n- New image tag: ${NEW_TAG}"
+            --title "chore(deploy): promote dev image to ${NEW_TAG}" \
+            --body "Automated dev promotion PR from app CI pipeline.\n\n- Source repo: $GITHUB_REPOSITORY\n- Source commit: $GITHUB_SHA\n- Target environment: dev\n- New image tag: ${NEW_TAG}"
