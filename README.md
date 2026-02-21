@@ -32,6 +32,14 @@ This repository now includes GitHub Actions workflows for:
 		- `sha-<commit_sha>`
 		- `latest`
 	- Open automated PR in `devops-lab-deploy` updating app image tag
+- Environment promotions from app repo (`.github/workflows/ci-promote-environment.yml`)
+	- Manual `workflow_dispatch` to promote:
+		- `dev -> staging`
+		- `staging -> prod-blue`
+		- `staging -> prod-green`
+	- Promotion is requested from app repo and opens PR in `devops-lab-deploy` behind the scenes
+	- `staging` promotions require approval in app `staging` environment
+	- `prod-*` promotions require approval in app `production` environment
 
 ### Required GitHub Secrets
 
@@ -48,6 +56,17 @@ This repository now includes GitHub Actions workflows for:
 - `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (required when `RUNTIME_IMAGE_REPO` is not GHCR)
 	- Used by publish workflow to login and push image to Docker Hub
 	- For GHCR, workflow uses `GITHUB_TOKEN`
+
+### Required GitHub Environments (app repo)
+
+Configure protected environments in the app repository so promotion approvals happen before deploy PR creation:
+
+- `staging`
+	- Required reviewers: staging approvers/tech lead
+- `prod`
+	- Required reviewers: production approvers/release managers
+
+This allows end users to operate only in app repository Actions while keeping deploy repository access transparent.
 
 ## Phase 3 Quickstart
 
