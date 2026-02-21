@@ -68,8 +68,12 @@ jobs:
         id: gate
         env:
           DEPLOY_REPO_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+          ENABLE_DEPLOY_PROMOTION: ${{ secrets.ENABLE_DEPLOY_PROMOTION }}
         run: |
-          if [ -z "$DEPLOY_REPO_TOKEN" ]; then
+          if [ "$ENABLE_DEPLOY_PROMOTION" != "true" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "ENABLE_DEPLOY_PROMOTION is not true; skipping deploy PR creation"
+          elif [ -z "$DEPLOY_REPO_TOKEN" ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "DEPLOY_REPO_TOKEN not configured; skipping deploy PR creation"
           else
