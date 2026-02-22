@@ -7,7 +7,7 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
   pull-requests: write
   issues: write
 
@@ -118,8 +118,7 @@ jobs:
           gh label create "deploy-operation-dispatched" --repo "$GITHUB_REPOSITORY" --color "1f6feb" --description "Deploy request already dispatched" --force
           gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "deploy-operation-dispatched"
           gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "✅ Approved and dispatched **${OPERATION}** for **${TARGET_ENV}**.\n\n- Workflow: ${WORKFLOW_NAME}\n- Run: ${RUN_URL}\n\nThis PR served as an approval gate and will be closed without merging."
-          gh pr close "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
-          git push origin --delete "$BRANCH" 2>/dev/null || true
+          gh pr close "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --delete-branch
 
       - name: Comment back on source issue
         env:
