@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: DevOps Lab Hub Documentation
-    url: https://github.com/flaviopiccolo-boop/devops-lab-hub
+    url: https://github.com/pipeops-platform/devops-lab-hub
     about: Check standards, runbooks, and phase documentation before opening a deploy operation issue.
