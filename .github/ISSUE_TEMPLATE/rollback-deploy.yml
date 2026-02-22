@@ -18,6 +18,14 @@ body:
         - prod-green
     validations:
       required: true
+  - type: input
+    id: rollback_version
+    attributes:
+      label: Rollback version (optional)
+      description: Informe a tag de versão para rollback (ex: sha-abc123...). Deixe em branco para voltar para o previous stable.
+      placeholder: sha-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    validations:
+      required: false
   - type: textarea
     id: incident
     attributes:
