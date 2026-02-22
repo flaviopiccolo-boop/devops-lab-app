@@ -1,0 +1,9 @@
+{
+  "issue_number": 74,
+  "issue_title": "[Deploy Promote]:",
+  "operation": "promote",
+  "target_env": "aws-dev",
+  "rollback_version": "",
+  "correlation_id": "issue-74-promote-aws-dev",
+  "requested_by": "flaviopiccolo-boop"
+}
