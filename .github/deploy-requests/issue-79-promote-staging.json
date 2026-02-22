@@ -1,0 +1,9 @@
+{
+  "issue_number": 79,
+  "issue_title": "[Deploy Promote]:  depoy V3 - Staging",
+  "operation": "promote",
+  "target_env": "staging",
+  "rollback_version": "",
+  "correlation_id": "issue-79-promote-staging",
+  "requested_by": "flaviopiccolo-boop"
+}
