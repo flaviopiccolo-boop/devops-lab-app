@@ -18,11 +18,15 @@ body:
         - prod-green
     validations:
       required: true
+  - type: markdown
+    attributes:
+      value: |
+        **Available versions:** check the [Docker Hub tags](https://hub.docker.com/r/flaviopiccolo/devops-lab-app/tags) page for a list of deployed image tags.
   - type: input
     id: rollback_version
     attributes:
       label: "Rollback version (optional)"
-      description: "Specify the image tag to rollback to (e.g. sha-abc1234). Leave blank to use the previous stable version."
+      description: "Copy a tag from Docker Hub (e.g. sha-abc1234). Leave blank to use the previous stable version."
       placeholder: "sha-abc1234"
     validations:
       required: false
