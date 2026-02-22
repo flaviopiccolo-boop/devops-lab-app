@@ -13,6 +13,8 @@ on:
           - staging
           - prod-blue
           - prod-green
+          - aws-dev
+          - aws-staging
       correlation_id:
         description: Correlation id from issue orchestrator (optional)
         required: false
@@ -40,6 +42,10 @@ jobs:
 
           if [ "$TARGET_ENV" = "staging" ]; then
             echo "source_env=dev" >> "$GITHUB_OUTPUT"
+          elif [ "$TARGET_ENV" = "aws-dev" ]; then
+            echo "source_env=dev" >> "$GITHUB_OUTPUT"
+          elif [ "$TARGET_ENV" = "aws-staging" ]; then
+            echo "source_env=aws-dev" >> "$GITHUB_OUTPUT"
           elif [ "$TARGET_ENV" = "prod-blue" ] || [ "$TARGET_ENV" = "prod-green" ]; then
             echo "source_env=staging" >> "$GITHUB_OUTPUT"
           else
@@ -173,9 +179,62 @@ jobs:
           echo "Watching deploy workflow run id: $RUN_ID"
           gh run watch --repo "$DEPLOY_REPO" "$RUN_ID" --exit-status
 
+  promote-aws:
+    name: Promote into AWS overlays
+    needs: [plan, gate]
+    if: (needs.plan.outputs.target_env == 'aws-dev' || needs.plan.outputs.target_env == 'aws-staging') && needs.gate.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment: aws
+
+    steps:
+      - name: Dispatch and wait deploy promotion workflow
+        env:
+          GH_TOKEN: ${{ secrets.APP_PR_TOKEN }}
+          DEPLOY_REPO: pipeops-platform/devops-lab-deploy
+          DEPLOY_BASE_BRANCH: main
+          SOURCE_ENV: ${{ needs.plan.outputs.source_env }}
+          TARGET_ENV: ${{ needs.plan.outputs.target_env }}
+          INPUT_CORRELATION_ID: ${{ inputs.correlation_id }}
+        run: |
+          WORKFLOW_NAME="Promote Environment"
+          CORRELATION_ID="$INPUT_CORRELATION_ID"
+          if [ -z "$CORRELATION_ID" ]; then
+            CORRELATION_ID="app-${GITHUB_RUN_ID}-${GITHUB_JOB}-${RANDOM}"
+          fi
+
+          gh workflow run "$WORKFLOW_NAME" \
+            --repo "$DEPLOY_REPO" \
+            --ref "$DEPLOY_BASE_BRANCH" \
+            -f source_env="$SOURCE_ENV" \
+            -f target_env="$TARGET_ENV" \
+            -f correlation_id="$CORRELATION_ID"
+
+          RUN_ID=""
+          for _ in $(seq 1 60); do
+            RUN_ID=$(gh run list \
+              --repo "$DEPLOY_REPO" \
+              --workflow "$WORKFLOW_NAME" \
+              --event workflow_dispatch \
+              --limit 30 \
+              --json databaseId,displayTitle \
+              --jq ".[] | select(.displayTitle | contains(\"$CORRELATION_ID\")) | .databaseId" | head -n 1)
+            if [ -n "$RUN_ID" ]; then
+              break
+            fi
+            sleep 5
+          done
+
+          if [ -z "$RUN_ID" ]; then
+            echo "Could not find dispatched deploy workflow run for correlation id: $CORRELATION_ID"
+            exit 1
+          fi
+
+          echo "Watching deploy workflow run id: $RUN_ID"
+          gh run watch --repo "$DEPLOY_REPO" "$RUN_ID" --exit-status
+
   issue-feedback:
     name: Update source issue
-    needs: [promote-staging, promote-production]
+    needs: [promote-staging, promote-production, promote-aws]
     if: always() && startsWith(inputs.correlation_id, 'issue-')
     runs-on: ubuntu-latest
 
@@ -187,6 +246,7 @@ jobs:
           TARGET_ENV: ${{ inputs.target_env }}
           STAGING_RESULT: ${{ needs.promote-staging.result }}
           PROD_RESULT: ${{ needs.promote-production.result }}
+          AWS_RESULT: ${{ needs.promote-aws.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           ISSUE_NUMBER=$(echo "$CORRELATION_ID" | sed -E 's/^issue-([0-9]+)-.*/\1/')
@@ -196,11 +256,11 @@ jobs:
           fi
 
           DEPLOY_RESULT="skipped"
-          if [ "$STAGING_RESULT" = "success" ] || [ "$PROD_RESULT" = "success" ]; then
+          if [ "$STAGING_RESULT" = "success" ] || [ "$PROD_RESULT" = "success" ] || [ "$AWS_RESULT" = "success" ]; then
             DEPLOY_RESULT="success"
-          elif [ "$STAGING_RESULT" = "failure" ] || [ "$PROD_RESULT" = "failure" ]; then
+          elif [ "$STAGING_RESULT" = "failure" ] || [ "$PROD_RESULT" = "failure" ] || [ "$AWS_RESULT" = "failure" ]; then
             DEPLOY_RESULT="failure"
-          elif [ "$STAGING_RESULT" = "cancelled" ] || [ "$PROD_RESULT" = "cancelled" ]; then
+          elif [ "$STAGING_RESULT" = "cancelled" ] || [ "$PROD_RESULT" = "cancelled" ] || [ "$AWS_RESULT" = "cancelled" ]; then
             DEPLOY_RESULT="cancelled"
           fi
 

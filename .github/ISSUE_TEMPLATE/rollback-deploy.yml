@@ -16,6 +16,7 @@ body:
         - staging
         - prod-blue
         - prod-green
+        - aws-staging
     validations:
       required: true
   - type: markdown

@@ -54,7 +54,7 @@ jobs:
 
           if operation not in {"promote", "rollback"}:
             raise SystemExit(f"Unsupported operation in metadata: {operation}")
-          if target_env not in {"staging", "prod-blue", "prod-green"}:
+          if target_env not in {"staging", "prod-blue", "prod-green", "aws-dev", "aws-staging"}:
             raise SystemExit(f"Unsupported target_env in metadata: {target_env}")
 
           output_file = Path(os.environ["GITHUB_OUTPUT"])
