@@ -76,7 +76,6 @@ jobs:
       DEPLOY_BASE_BRANCH: main
       DEPLOY_FILE: apps/devops-lab-app/overlays/dev/kustomization.yaml
       DEPLOY_IMAGE_NAME: pipeops/devops-lab-app
-      ENABLE_DEPLOY_AUTO_MERGE: ${{ secrets['ENABLE_DEPLOY_AUTO_MERGE'] }}
       NEW_IMAGE_REPO: ${{ secrets.RUNTIME_IMAGE_REPO != '' && secrets.RUNTIME_IMAGE_REPO || format('ghcr.io/{0}', github.repository) }}
       NEW_TAG: ${{ needs.publish.outputs.image_tag }}
 
@@ -167,17 +166,8 @@ jobs:
 
           EXISTING_PR=$(gh pr list --repo "$DEPLOY_REPO" --base "$DEPLOY_BASE_BRANCH" --head "$BRANCH" --state open --json number --jq '.[0].number')
           if [ -n "$EXISTING_PR" ]; then
-            echo "PR already exists: #$EXISTING_PR"
-
-            if [ "$ENABLE_DEPLOY_AUTO_MERGE" = "true" ]; then
-              set +e
-              gh pr merge --repo "$DEPLOY_REPO" --auto --squash "$EXISTING_PR"
-              MERGE_EXIT=$?
-              set -e
-              if [ $MERGE_EXIT -ne 0 ]; then
-                echo "Auto-merge could not be enabled for existing PR #$EXISTING_PR; manual merge may still be required"
-              fi
-            fi
+            echo "PR already exists: #$EXISTING_PR — merging immediately"
+            gh pr merge --repo "$DEPLOY_REPO" --squash --admin --delete-branch "$EXISTING_PR"
             exit 0
           fi
 
@@ -194,12 +184,4 @@ jobs:
             exit 1
           fi
 
-          if [ "$ENABLE_DEPLOY_AUTO_MERGE" = "true" ]; then
-            set +e
-            gh pr merge --repo "$DEPLOY_REPO" --auto --squash "$CREATED_PR"
-            MERGE_EXIT=$?
-            set -e
-            if [ $MERGE_EXIT -ne 0 ]; then
-              echo "Auto-merge could not be enabled for PR #$CREATED_PR; manual merge may still be required"
-            fi
-          fi
+          gh pr merge --repo "$DEPLOY_REPO" --squash --admin --delete-branch "$CREATED_PR"
