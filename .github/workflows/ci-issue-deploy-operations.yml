@@ -57,6 +57,13 @@ jobs:
           if target_env not in allowed:
             raise SystemExit(f"Unsupported target environment: {target_env!r}")
 
+          rollback_version = ""
+          rollback_match = re.search(r"(?im)^###\s*Rollback version \(optional\)\s*$\s*([\s\S]*?)(?:^###\s|\Z)", issue_body)
+          if rollback_match:
+            rollback_version = next((line.strip() for line in rollback_match.group(1).splitlines() if line.strip()), "")
+          if operation == "promote":
+            rollback_version = ""
+
           issue_number = os.environ.get("ISSUE_NUMBER", "0")
           correlation_id = f"issue-{issue_number}-{operation}-{target_env}"
 
@@ -67,6 +74,7 @@ jobs:
             output.write(f"correlation_id={correlation_id}\n")
             output.write(f"issue_number={issue_number}\n")
             output.write(f"issue_title={issue_title}\n")
+            output.write(f"rollback_version={rollback_version}\n")
           PY
 
       - name: Checkout app repo
@@ -81,6 +89,7 @@ jobs:
           CORRELATION_ID: ${{ steps.parse.outputs.correlation_id }}
           ISSUE_NUMBER: ${{ steps.parse.outputs.issue_number }}
           ISSUE_TITLE: ${{ steps.parse.outputs.issue_title }}
+          ROLLBACK_VERSION: ${{ steps.parse.outputs.rollback_version }}
         run: |
           REQUEST_DIR=".github/deploy-requests"
           REQUEST_FILE="$REQUEST_DIR/${CORRELATION_ID}.json"
@@ -94,6 +103,7 @@ jobs:
             "issue_title": "${ISSUE_TITLE//"/\"}",
             "operation": "${OPERATION}",
             "target_env": "${TARGET_ENV}",
+            "rollback_version": "${ROLLBACK_VERSION//"/\"}",
             "correlation_id": "${CORRELATION_ID}",
             "requested_by": "${{ github.actor }}"
           }
@@ -134,12 +144,14 @@ jobs:
 
           - Operation: ${OPERATION}
           - Target environment: ${TARGET_ENV}
+          - Rollback version: ${ROLLBACK_VERSION:-previous-stable}
           - Requested by: ${{ github.actor }}
 
           <!-- deploy-operation-metadata
           issue_number: ${ISSUE_NUMBER}
           operation: ${OPERATION}
           target_env: ${TARGET_ENV}
+          rollback_version: ${ROLLBACK_VERSION}
           correlation_id: ${CORRELATION_ID}
           request_file: ${REQUEST_FILE}
           -->

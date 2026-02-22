@@ -17,6 +17,10 @@ on:
         description: Correlation id from issue orchestrator (optional)
         required: false
         type: string
+      rollback_version:
+        description: Optional image tag to rollback to (e.g. sha-...); when empty uses previous stable
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -58,6 +62,7 @@ jobs:
           TARGET_ENV: ${{ inputs.target_env }}
           CORRELATION_ID: ${{ inputs.correlation_id != '' && inputs.correlation_id || format('app-rollback-{0}-{1}', github.run_id, github.job) }}
           REQUESTED_BY: ${{ github.actor }}
+          ROLLBACK_VERSION: ${{ inputs.rollback_version }}
         run: |
           WORKFLOW_NAME="Rollback Environment"
 
@@ -66,7 +71,8 @@ jobs:
             --ref "$DEPLOY_BASE_BRANCH" \
             -f target_env="$TARGET_ENV" \
             -f requested_by="$REQUESTED_BY" \
-            -f correlation_id="$CORRELATION_ID"
+            -f correlation_id="$CORRELATION_ID" \
+            -f rollback_version="$ROLLBACK_VERSION"
 
           RUN_ID=""
           for _ in $(seq 1 60); do
@@ -106,6 +112,7 @@ jobs:
           TARGET_ENV: ${{ inputs.target_env }}
           CORRELATION_ID: ${{ inputs.correlation_id != '' && inputs.correlation_id || format('app-rollback-{0}-{1}', github.run_id, github.job) }}
           REQUESTED_BY: ${{ github.actor }}
+          ROLLBACK_VERSION: ${{ inputs.rollback_version }}
         run: |
           WORKFLOW_NAME="Rollback Environment"
 
@@ -114,7 +121,8 @@ jobs:
             --ref "$DEPLOY_BASE_BRANCH" \
             -f target_env="$TARGET_ENV" \
             -f requested_by="$REQUESTED_BY" \
-            -f correlation_id="$CORRELATION_ID"
+            -f correlation_id="$CORRELATION_ID" \
+            -f rollback_version="$ROLLBACK_VERSION"
 
           RUN_ID=""
           for _ in $(seq 1 60); do

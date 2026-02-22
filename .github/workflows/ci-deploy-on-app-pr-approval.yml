@@ -40,10 +40,17 @@ jobs:
               raise SystemExit(f"Missing deploy metadata key: {key}")
             return match.group(1).strip()
 
+          def read_optional_value(key: str) -> str:
+            match = re.search(rf"(?im)^\s*{re.escape(key)}:\s*(.*?)\s*$", body)
+            if not match:
+              return ""
+            return match.group(1).strip()
+
           operation = read_value("operation")
           target_env = read_value("target_env")
           correlation_id = read_value("correlation_id")
           issue_number = read_value("issue_number")
+          rollback_version = read_optional_value("rollback_version")
 
           if operation not in {"promote", "rollback"}:
             raise SystemExit(f"Unsupported operation in metadata: {operation}")
@@ -56,6 +63,7 @@ jobs:
             output.write(f"target_env={target_env}\n")
             output.write(f"correlation_id={correlation_id}\n")
             output.write(f"issue_number={issue_number}\n")
+            output.write(f"rollback_version={rollback_version}\n")
           PY
 
       - name: Dispatch requested workflow
@@ -66,6 +74,7 @@ jobs:
           TARGET_ENV: ${{ steps.parse.outputs.target_env }}
           CORRELATION_ID: ${{ steps.parse.outputs.correlation_id }}
           ISSUE_NUMBER: ${{ steps.parse.outputs.issue_number }}
+          ROLLBACK_VERSION: ${{ steps.parse.outputs.rollback_version }}
           REPO: ${{ github.repository }}
         run: |
           if [ "$OPERATION" = "promote" ]; then
@@ -74,11 +83,20 @@ jobs:
             WORKFLOW_NAME="CI - Rollback Environment"
           fi
 
-          gh workflow run "$WORKFLOW_NAME" \
-            --repo "$REPO" \
-            --ref "main" \
-            -f target_env="$TARGET_ENV" \
-            -f correlation_id="$CORRELATION_ID"
+          if [ "$OPERATION" = "rollback" ] && [ -n "$ROLLBACK_VERSION" ]; then
+            gh workflow run "$WORKFLOW_NAME" \
+              --repo "$REPO" \
+              --ref "main" \
+              -f target_env="$TARGET_ENV" \
+              -f correlation_id="$CORRELATION_ID" \
+              -f rollback_version="$ROLLBACK_VERSION"
+          else
+            gh workflow run "$WORKFLOW_NAME" \
+              --repo "$REPO" \
+              --ref "main" \
+              -f target_env="$TARGET_ENV" \
+              -f correlation_id="$CORRELATION_ID"
+          fi
 
           RUN_ID=""
           for _ in $(seq 1 60); do
