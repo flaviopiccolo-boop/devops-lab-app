@@ -25,11 +25,11 @@ body:
   - type: input
     id: rollback_version
     attributes:
-      label: "Rollback version (optional)"
-      description: "Copy a tag from Docker Hub (e.g. sha-abc1234). Leave blank to use the previous stable version."
+      label: "Rollback version (required)"
+      description: "Copy a deployed image tag from Docker Hub (e.g. sha-abc1234)."
       placeholder: "sha-abc1234"
     validations:
-      required: false
+      required: true
   - type: textarea
     id: incident
     attributes:
@@ -43,7 +43,7 @@ body:
     attributes:
       label: Confirmation
       options:
-        - label: I confirm rollback should target the previous stable version.
+        - label: I confirm rollback should target the specified image version.
           required: true
         - label: I understand rollback may require environment approval before execution.
           required: true
