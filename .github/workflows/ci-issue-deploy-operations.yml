@@ -97,17 +97,31 @@ jobs:
           BASE_BRANCH="${{ github.event.repository.default_branch }}"
 
           mkdir -p "$REQUEST_DIR"
-          cat > "$REQUEST_FILE" <<EOF
-          {
-            "issue_number": ${ISSUE_NUMBER},
-            "issue_title": "${ISSUE_TITLE//"/\"}",
-            "operation": "${OPERATION}",
-            "target_env": "${TARGET_ENV}",
-            "rollback_version": "${ROLLBACK_VERSION//"/\"}",
-            "correlation_id": "${CORRELATION_ID}",
-            "requested_by": "${{ github.actor }}"
+          REQUEST_FILE="$REQUEST_FILE" \
+          ISSUE_NUMBER="$ISSUE_NUMBER" \
+          ISSUE_TITLE="$ISSUE_TITLE" \
+          OPERATION="$OPERATION" \
+          TARGET_ENV="$TARGET_ENV" \
+          ROLLBACK_VERSION="$ROLLBACK_VERSION" \
+          CORRELATION_ID="$CORRELATION_ID" \
+          REQUESTED_BY="${{ github.actor }}" \
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          request_file = Path(os.environ["REQUEST_FILE"])
+          payload = {
+            "issue_number": int(os.environ["ISSUE_NUMBER"]),
+            "issue_title": os.environ.get("ISSUE_TITLE", ""),
+            "operation": os.environ.get("OPERATION", ""),
+            "target_env": os.environ.get("TARGET_ENV", ""),
+            "rollback_version": os.environ.get("ROLLBACK_VERSION", ""),
+            "correlation_id": os.environ.get("CORRELATION_ID", ""),
+            "requested_by": os.environ.get("REQUESTED_BY", ""),
           }
-          EOF
+          request_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          PY
 
           git checkout -B "$BRANCH"
           git config user.name "github-actions[bot]"
