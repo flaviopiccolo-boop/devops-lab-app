@@ -16,6 +16,8 @@ body:
         - staging
         - prod-blue
         - prod-green
+        - aws-dev
+        - aws-staging
     validations:
       required: true
   - type: textarea

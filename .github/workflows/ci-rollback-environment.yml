@@ -13,6 +13,7 @@ on:
           - staging
           - prod-blue
           - prod-green
+          - aws-staging
       correlation_id:
         description: Correlation id from issue orchestrator (optional)
         required: false
@@ -146,9 +147,59 @@ jobs:
 
           gh run watch --repo "$DEPLOY_REPO" "$RUN_ID" --exit-status
 
+  rollback-aws:
+    name: Rollback AWS staging to previous stable
+    needs: gate
+    if: inputs.target_env == 'aws-staging' && needs.gate.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment: aws
+
+    steps:
+      - name: Dispatch and wait deploy rollback workflow
+        env:
+          GH_TOKEN: ${{ secrets.APP_PR_TOKEN }}
+          DEPLOY_REPO: pipeops-platform/devops-lab-deploy
+          DEPLOY_BASE_BRANCH: main
+          TARGET_ENV: ${{ inputs.target_env }}
+          CORRELATION_ID: ${{ inputs.correlation_id != '' && inputs.correlation_id || format('app-rollback-{0}-{1}', github.run_id, github.job) }}
+          REQUESTED_BY: ${{ github.actor }}
+          ROLLBACK_VERSION: ${{ inputs.rollback_version }}
+        run: |
+          WORKFLOW_NAME="Rollback Environment"
+
+          gh workflow run "$WORKFLOW_NAME" \
+            --repo "$DEPLOY_REPO" \
+            --ref "$DEPLOY_BASE_BRANCH" \
+            -f target_env="$TARGET_ENV" \
+            -f requested_by="$REQUESTED_BY" \
+            -f correlation_id="$CORRELATION_ID" \
+            -f rollback_version="$ROLLBACK_VERSION"
+
+          RUN_ID=""
+          for _ in $(seq 1 60); do
+            RUN_ID=$(gh run list \
+              --repo "$DEPLOY_REPO" \
+              --workflow "$WORKFLOW_NAME" \
+              --event workflow_dispatch \
+              --limit 30 \
+              --json databaseId,displayTitle \
+              --jq ".[] | select(.displayTitle | contains(\"$CORRELATION_ID\")) | .databaseId" | head -n 1)
+            if [ -n "$RUN_ID" ]; then
+              break
+            fi
+            sleep 5
+          done
+
+          if [ -z "$RUN_ID" ]; then
+            echo "Could not find dispatched deploy rollback run for correlation id: $CORRELATION_ID"
+            exit 1
+          fi
+
+          gh run watch --repo "$DEPLOY_REPO" "$RUN_ID" --exit-status
+
   issue-feedback:
     name: Update source issue
-    needs: [rollback-staging, rollback-production]
+    needs: [rollback-staging, rollback-production, rollback-aws]
     if: always() && startsWith(inputs.correlation_id, 'issue-')
     runs-on: ubuntu-latest
 
@@ -160,6 +211,7 @@ jobs:
           TARGET_ENV: ${{ inputs.target_env }}
           STAGING_RESULT: ${{ needs.rollback-staging.result }}
           PROD_RESULT: ${{ needs.rollback-production.result }}
+          AWS_RESULT: ${{ needs.rollback-aws.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           ISSUE_NUMBER=$(echo "$CORRELATION_ID" | sed -E 's/^issue-([0-9]+)-.*/\1/')
@@ -169,11 +221,11 @@ jobs:
           fi
 
           DEPLOY_RESULT="skipped"
-          if [ "$STAGING_RESULT" = "success" ] || [ "$PROD_RESULT" = "success" ]; then
+          if [ "$STAGING_RESULT" = "success" ] || [ "$PROD_RESULT" = "success" ] || [ "$AWS_RESULT" = "success" ]; then
             DEPLOY_RESULT="success"
-          elif [ "$STAGING_RESULT" = "failure" ] || [ "$PROD_RESULT" = "failure" ]; then
+          elif [ "$STAGING_RESULT" = "failure" ] || [ "$PROD_RESULT" = "failure" ] || [ "$AWS_RESULT" = "failure" ]; then
             DEPLOY_RESULT="failure"
-          elif [ "$STAGING_RESULT" = "cancelled" ] || [ "$PROD_RESULT" = "cancelled" ]; then
+          elif [ "$STAGING_RESULT" = "cancelled" ] || [ "$PROD_RESULT" = "cancelled" ] || [ "$AWS_RESULT" = "cancelled" ]; then
             DEPLOY_RESULT="cancelled"
           fi
 
