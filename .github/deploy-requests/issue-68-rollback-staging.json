@@ -1,0 +1,9 @@
+{
+  "issue_number": 68,
+  "issue_title": "[Deploy Rollback]:",
+  "operation": "rollback",
+  "target_env": "staging",
+  "rollback_version": "sha-0e2fac81e0f6585d5914b73a5b67c2554d806e2a",
+  "correlation_id": "issue-68-rollback-staging",
+  "requested_by": "flaviopiccolo-boop"
+}
