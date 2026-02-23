@@ -1,0 +1,9 @@
+{
+  "issue_number": 86,
+  "issue_title": "[Deploy Promote]:  test",
+  "operation": "promote",
+  "target_env": "staging",
+  "rollback_version": "",
+  "correlation_id": "issue-86-promote-staging",
+  "requested_by": "flaviopiccolo-boop"
+}
